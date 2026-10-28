@@ -17,6 +17,7 @@ Regras:
 """
 import argparse
 import collections
+import json
 import re
 import unicodedata
 from pathlib import Path
@@ -42,9 +43,9 @@ NOMES_CONHECIDOS = [
     ("CPDE", 189),              # CENTRO DE PESQUISA E DIAGNOSTICOS ESPECIALIZADOS
 ]
 
-# Decisões pontuais do usuário, por serial da ONU: (classificação, motivo).
+# Decisões pontuais do usuário, por (serial, descrição) da ONU: (classificação, motivo).
 DECISOES_MANUAIS = {
-    "VSOL00CD28FB": ("Desativado", "CTR-201939-REBECA: ONU offline e PPPoE online por outro caminho — não usa esta OLT"),
+    ("VSOL00CD28FB", "CTR-201939-REBECA"): ("Desativado", "CTR-201939-REBECA: ONU offline e PPPoE online por outro caminho — não usa esta OLT"),
 }
 
 SGP_ATIVO = {"ativo", "suspenso"}
@@ -124,14 +125,16 @@ class SGP:
             self.por_cliente[c["Cliente ID"]].append(c)
 
     def por_nome(self, texto):
-        """Uma palavra: compara com o primeiro nome. Várias: todas precisam estar no nome."""
+        """Uma palavra: primeiro nome, ou primeiro nome + outro nome colados (DOUGLASVARELA).
+        Várias palavras: todas precisam estar no nome."""
         palavras = [compacto(p) for p in re.split(r"[-_. ]+", texto) if len(compacto(p)) >= 3]
         if not palavras:
             return []
         achados = []
         for c in self.contratos.values():
             nome = [compacto(p) for p in str(c["Cliente"]).split()]
-            if (len(palavras) == 1 and nome and nome[0] == palavras[0]) or \
+            if (len(palavras) == 1 and nome and (nome[0] == palavras[0] or
+                                                 any(nome[0] + w == palavras[0] for w in nome[1:]))) or \
                (len(palavras) > 1 and all(p in nome for p in palavras)):
                 achados.append(c)
         return achados
@@ -160,7 +163,7 @@ def classificar_sgp(o, sgp):
     if cid is not None:
         c = sgp.contratos.get(cid)
         if not c:
-            o["classe"] = "Não encontrado"
+            o["classe"] = "Desativado" if o["estado"] == "Down" else "Não encontrado"
             o["obs"].append(f"Contrato {cid} não existe no SGP {NOME_PARCEIRO_SGP}")
             return
         candidatos = [c]
@@ -169,7 +172,7 @@ def classificar_sgp(o, sgp):
         candidatos = sgp.por_nome(nome)
         o["sgp_achado_por"] = "Nome"
         if not candidatos:
-            o["classe"] = "Conferir"
+            o["classe"] = "Desativado" if o["estado"] == "Down" else "Conferir"
             o["obs"].append(f"Sem número do contrato SGP e nenhum cliente {NOME_PARCEIRO_SGP} com o nome '{nome}'")
             return
         classes = {classe_sgp(c["Status"]) for c in candidatos}
@@ -195,7 +198,7 @@ def classificar_sgp(o, sgp):
 
 def extrair_numero(descricao):
     """CTR-555, CTR-555-NOME, C-TR-555, CTR555, 555-NOME → '555'."""
-    m = re.match(r"^\s*C-?TR\s*[-_ ]?\s*(\d+)(.*)$", descricao, re.I) or re.match(r"^\s*(\d+)(.*)$", descricao)
+    m = re.match(r"^\s*C-?(?:TR|RT)\s*[-_ ]?\s*(\d+)(.*)$", descricao, re.I) or re.match(r"^\s*(\d+)(.*)$", descricao)
     if not m:
         return None, descricao
     return m.group(1), m.group(2).strip(" -_.")
@@ -230,7 +233,7 @@ def sugerir_cliente(ixc, descricao):
                      for nome, v in list(achados.items())[:3])
 
 
-def classificar(onus, ixc, sgp=None):
+def classificar(onus, ixc, sgp=None, outras_olts=None):
     repeticoes = collections.Counter(extrair_numero(o["descricao"])[0] for o in onus)
     descricoes = collections.Counter(o["descricao"].upper().replace("ID", "") for o in onus)
 
@@ -331,9 +334,17 @@ def classificar(onus, ixc, sgp=None):
             o["obs"].append("ONU antiga: o mesmo cliente está online em " +
                             ", ".join(f"{x['pon']} ONU {x['onu_id']} ({x['descricao']})" for x in outras))
 
+    # mesmo serial provisionado em outra OLT: se aqui está offline e lá online, a ONU mudou de lugar
     for o in onus:
-        if o["serial"] in DECISOES_MANUAIS:
-            o["classe"], motivo = DECISOES_MANUAIS[o["serial"]]
+        for olt, x in (outras_olts or {}).get(o["serial"], []):
+            o["obs"].append(f"Serial também provisionado na {olt} ({x['descricao']}, {x['estado']})")
+            if o["estado"] == "Down" and x["estado"] == "Up" and o["classe"] != "Desativado":
+                o["classe"] = "Desativado"
+                o["obs"].append("ONU antiga: este equipamento está online em outra OLT")
+
+    for o in onus:
+        if (o["serial"], o["descricao"]) in DECISOES_MANUAIS:
+            o["classe"], motivo = DECISOES_MANUAIS[(o["serial"], o["descricao"])]
             o["obs"] = [motivo]
 
     for o in onus:  # alertas de estado da ONU
@@ -345,7 +356,7 @@ def classificar(onus, ixc, sgp=None):
                             (f" (última conexão PPPoE: {ult:%d/%m/%Y})" if hasattr(ult, "strftime") else ""))
         if o["classe"] == "Ativo" and o.get("login_ativo") == "Não":
             o["obs"].append("Contrato ativo, mas o login PPPoE está desabilitado no IXC")
-        if o["classe"] == "Ativo" and chave(o.get("status_ixc")) != "ativo":
+        if o["classe"] == "Ativo" and not chave(o.get("status_ixc")).startswith("ativo"):
             o["obs"].append(f"Status: {o['status_ixc']}")
     return onus
 
@@ -413,7 +424,40 @@ def ordenar(onus):
     return sorted(onus, key=lambda o: (tuple(int(x) for x in o["pon"].split("/")), o["onu_id"]))
 
 
-def gerar_limpeza(nome_olt, onus, destino):
+def aba_pop(wb, nome_olt, onus, pop):
+    """Inventário do POP (dados/pops.json) e ocupação das PONs."""
+    ws = wb.create_sheet("POP")
+    titulo(ws, f"{nome_olt} — Equipamentos do POP", pop.get("pop", ""))
+    cab = ["Equipamento", "Fabricante", "Modelo", "Observação"]
+    for c, v in enumerate(cab, 1):
+        ws.cell(4, c, v)
+    fmt_cab(ws, 4, len(cab))
+    r = 5
+    for e in pop.get("equipamentos", []):
+        for c, k in enumerate(("equipamento", "fabricante", "modelo", "obs"), 1):
+            ws.cell(r, c, e.get(k)).font = Font(name=FONTE)
+        r += 1
+    r += 2
+    ws.cell(r - 1, 1, "Ocupação das PONs (todas as ONUs provisionadas)").font = Font(name=FONTE, bold=True)
+    cab = ["PON", "ONUs provisionadas", "Online (Up)", "Offline (Down)", "A remover"]
+    for c, v in enumerate(cab, 1):
+        ws.cell(r, c, v)
+    fmt_cab(ws, r, len(cab))
+    pons = sorted({o["pon"] for o in onus}, key=lambda p: tuple(int(x) for x in p.split("/")))
+    for i, pon in enumerate(pons, r + 1):
+        do_pon = [o for o in onus if o["pon"] == pon]
+        valores = [pon, len(do_pon), sum(o["estado"] == "Up" for o in do_pon),
+                   sum(o["estado"] == "Down" for o in do_pon), sum(o["classe"] == "Desativado" for o in do_pon)]
+        for c, v in enumerate(valores, 1):
+            ws.cell(i, c, v).font = Font(name=FONTE)
+    total_pon = pop.get("portas_pon")
+    if total_pon:
+        ws.cell(r + len(pons) + 2, 1, f"PONs em uso: {len(pons)} de {total_pon}").font = Font(name=FONTE, bold=True)
+    for c, w in zip("ABCDE", (16, 18, 34, 40, 12)):
+        ws.column_dimensions[c].width = w
+
+
+def gerar_limpeza(nome_olt, onus, destino, pop=None):
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Resumo"
@@ -464,10 +508,12 @@ def gerar_limpeza(nome_olt, onus, destino):
     aba_lista(wb, "Remover", remover)
     aba_lista(wb, "Conferir", conferir)
     aba_lista(wb, "Todas", onus)
+    if pop:
+        aba_pop(wb, nome_olt, onus, pop)
     wb.save(destino)
 
 
-def gerar_ativos(nome_olt, onus, destino):
+def gerar_ativos(nome_olt, onus, destino, pop=None):
     ativos = [o for o in onus if o["classe"] in ("Ativo", "Pré-contrato")]
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -514,6 +560,8 @@ def gerar_ativos(nome_olt, onus, destino):
     ws.column_dimensions["B"].width = 45
 
     aba_lista(wb, "Ativos", ordenar(ativos), colunas)
+    if pop:
+        aba_pop(wb, nome_olt, onus, pop)
     wb.save(destino)
     return ativos
 
@@ -527,6 +575,8 @@ def main():
     ap.add_argument("--sgp", type=Path, help=f"Relatório de contratos do SGP da {NOME_PARCEIRO_SGP}")
     ap.add_argument("--fabricante", choices=sorted(LEITORES))
     ap.add_argument("--nome", help="Nome da OLT (padrão: nome do arquivo)")
+    ap.add_argument("--pops", type=Path, default=Path("dados/pops.json"),
+                    help="Inventário dos POPs: {nome_olt: {pop, portas_pon, equipamentos: [...]}}")
     a = ap.parse_args()
 
     texto = a.olt.read_text(encoding="utf-8", errors="replace")
@@ -534,11 +584,24 @@ def main():
     if not onus:
         raise SystemExit("Nenhuma ONU encontrada no arquivo.")
     nome = a.nome or a.olt.stem
-    onus = ordenar(classificar(onus, IXC(a.logins, a.contratos), SGP(a.sgp) if a.sgp else None))
+
+    # outras OLTs na mesma pasta, para achar o mesmo serial provisionado em mais de um lugar
+    outras = collections.defaultdict(list)
+    for arq in sorted(a.olt.parent.glob("*.txt")):
+        if arq.resolve() != a.olt.resolve():
+            t = arq.read_text(encoding="utf-8", errors="replace")
+            try:
+                for x in LEITORES[detectar_fabricante(t)](t):
+                    outras[x["serial"]].append((arq.stem, x))
+            except SystemExit:
+                pass
+
+    onus = ordenar(classificar(onus, IXC(a.logins, a.contratos), SGP(a.sgp) if a.sgp else None, outras))
+    pop = json.loads(a.pops.read_text(encoding="utf-8")).get(nome) if a.pops.exists() else None
 
     a.saida.mkdir(parents=True, exist_ok=True)
-    gerar_limpeza(nome, onus, a.saida / f"{nome}_limpeza.xlsx")
-    gerar_ativos(nome, onus, a.saida / f"{nome}_ativos.xlsx")
+    gerar_limpeza(nome, onus, a.saida / f"{nome}_limpeza.xlsx", pop)
+    gerar_ativos(nome, onus, a.saida / f"{nome}_ativos.xlsx", pop)
     cont = collections.Counter(o["classe"] for o in onus)
     print(f"{nome}: {len(onus)} ONUs — " + ", ".join(f"{k}: {v}" for k, v in cont.most_common()))
 
