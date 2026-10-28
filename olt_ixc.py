@@ -35,10 +35,12 @@ NUMEROS_ANTIGOS = {
     "2025928": 364,  # VISION TELECOM SERVIÇO DE COMUNICAÇÃO MULTIMIDIA LTDA
 }
 
-# Contratos de provedores parceiros (rede neutra) que não estão no plano 67.
+# Contratos de provedores parceiros (rede neutra) — IXC, relatório "Porta - Rede Neutra" de 28/10/2026.
+# Vale junto com o plano 67; inclui parceiros já desativados (as ONUs deles seguem o status do contrato).
 PARCEIROS_EXTRA = {
-    130,  # E F ANDRADE FIGUEIREDO LTDA (circuito de transporte)
-    364,  # VISION TELECOM
+    82, 119, 130, 131, 184, 233, 247, 296, 298, 299, 306, 317, 324, 325, 326, 336, 339, 351, 355, 356,
+    357, 364, 375, 377, 382, 384, 389, 397, 400, 404, 408, 419, 455, 460, 476, 490, 491, 494, 510, 512,
+    516, 523, 538, 541, 548, 563, 595, 599,
 }
 # Descrições só com nome → ID do contrato no IXC (confirmadas pelo usuário). Compara sem espaços/pontuação.
 NOMES_CONHECIDOS = [
@@ -378,6 +380,7 @@ def classificar(onus, ixc, sgp=None, outras_olts=None):
 
 AZUL = PatternFill("solid", start_color="1F4E78")
 CINZA = PatternFill("solid", start_color="F2F2F2")
+AMARELO = PatternFill("solid", start_color="FFFF00")
 CORES = {"Ativo": "E2EFDA", "Desativado": "FCE4D6", "Conferir": "FFF2CC",
          "Não encontrado": "FFF2CC", "Pré-contrato": "DDEBF7"}
 
@@ -448,7 +451,10 @@ def aba_pop(wb, nome_olt, onus, pop):
     r = 5
     for e in pop.get("equipamentos", []):
         for c, k in enumerate(("equipamento", "fabricante", "modelo", "obs"), 1):
-            ws.cell(r, c, e.get(k)).font = Font(name=FONTE)
+            cel = ws.cell(r, c, e.get(k))
+            cel.font = Font(name=FONTE)
+            if e.get(k) is None or (k == "modelo" and "definir" in str(e.get(k))):
+                cel.fill = AMARELO
         r += 1
     r += 2
     ws.cell(r - 1, 1, "Ocupação das PONs (todas as ONUs provisionadas)").font = Font(name=FONTE, bold=True)
@@ -466,7 +472,19 @@ def aba_pop(wb, nome_olt, onus, pop):
     total_pon = pop.get("portas_pon")
     if total_pon:
         ws.cell(r + len(pons) + 2, 1, f"PONs em uso: {len(pons)} de {total_pon}").font = Font(name=FONTE, bold=True)
-    for c, w in zip("ABCDE", (16, 18, 34, 40, 12)):
+    n = pop.get("colocation_linhas", 0)
+    if n:
+        r = r + len(pons) + 5
+        ws.cell(r - 1, 1, "Colocation — equipamentos de clientes no rack (preencher)").font = Font(name=FONTE, bold=True)
+        cab = ["Cliente", "Equipamento", "Modelo", "Posição no rack (U)", "Observação"]
+        for c, v in enumerate(cab, 1):
+            ws.cell(r, c, v)
+        fmt_cab(ws, r, len(cab))
+        for i in range(r + 1, r + 1 + n):
+            for c in range(1, len(cab) + 1):
+                ws.cell(i, c).fill = AMARELO
+        ws.cell(r + n + 2, 1, "Células amarelas: preencher manualmente.").font = Font(name=FONTE, italic=True, color="595959")
+    for c, w in zip("ABCDE", (22, 22, 34, 40, 30)):
         ws.column_dimensions[c].width = w
 
 
