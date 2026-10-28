@@ -23,6 +23,7 @@ Formatos de OLT suportados: Datacom (saída de `show interface gpon 1/1/ onu`). 
 - Ativo = status de acesso Ativo, Bloqueio Automático/Manual ou Financeiro em atraso.
 - Rede neutra = plano de venda 67 (Circuito Dedicado); "provável" quando o mesmo número aparece em 3 ou mais ONUs.
 - Parceiro Upwire (`CTR-201939-...`, contrato MARCELO SILVA DO CARMO): o status vem do relatório do SGP do parceiro (`--sgp`), pelo nº do contrato SGP (`CTR-201939-11202`) ou, sem número, pelo nome (`CTR-201939-MONICA`). Cancelado = remover, Suspenso = ativo, Inativo = pré-contrato. Nome ambíguo ou cliente com outro contrato ativo vai para "Conferir".
+- Números do sistema antigo da CCS Brasil (`2019xxx`–`2026xxx`) são buscados como login no IXC; os que não têm login são mapeados em `NUMEROS_ANTIGOS` no script (ex.: `2023716` → contrato 538, ID HOUSE).
 - Senhas e outros dados sensíveis do IXC nunca vão para a saída.
 
 As pastas `dados/` e `saida/` ficam fora do git porque têm dados de clientes.

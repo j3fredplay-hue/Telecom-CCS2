@@ -26,8 +26,12 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 PLANO_REDE_NEUTRA = 67
-PARCEIRO_SGP = "201939"  # login do contrato da Upwire (MARCELO SILVA DO CARMO) no IXC
+PARCEIRO_SGP = "201939"  # nº do sistema antigo da Upwire; no IXC é o contrato 388 (MARCELO SILVA DO CARMO)
 NOME_PARCEIRO_SGP = "Upwire"
+# Números do sistema antigo da CCS Brasil que não existem como login no IXC → ID do contrato no IXC.
+NUMEROS_ANTIGOS = {
+    "2023716": 538,  # ID HOUSE TECNOLOGIA E CERTIFICACAO LTDA
+}
 SGP_ATIVO = {"ativo", "suspenso"}
 SGP_DESATIVADO = {"cancelado"}
 SGP_PRE = {"inativo"}  # contrato criado e nunca ativado
@@ -223,6 +227,9 @@ def classificar(onus, ixc, sgp=None):
         if num is None:
             o["classe"] = "Conferir"
             o["obs"].append("Descrição sem número de contrato/login")
+            if "NOVASOLU" in compacto(o["descricao"]):
+                o["obs"].append("Ex-Nova Solutec: pode ser cliente CCS ou Upwire e estar configurado por VLAN "
+                                "(/30 ou /29), sem login PPPoE")
             sug = sugerir_cliente(ixc, o["descricao"])
             if sug:
                 o["obs"].append(f"Possível cliente: {sug}")
@@ -249,6 +256,9 @@ def classificar(onus, ixc, sgp=None):
             elif por_contrato:
                 c = por_contrato
                 o.update(contrato=num and int(num), achado_por="Contrato")
+            elif num in NUMEROS_ANTIGOS:
+                c = ixc.contrato(NUMEROS_ANTIGOS[num])
+                o.update(contrato=NUMEROS_ANTIGOS[num], achado_por="Nº antigo")
             else:
                 c = None
 
@@ -258,7 +268,8 @@ def classificar(onus, ixc, sgp=None):
                 o["classe"] = "Conferir" if o.get("conflito") else classe_status(c["Status acesso"])
             else:
                 o["classe"] = "Não encontrado"
-                o["obs"].append("Número não existe no IXC como login nem como contrato")
+                o["obs"].append("Número não existe no IXC como login nem como contrato"
+                                + (" (nº do sistema antigo da CCS Brasil)" if len(num) >= 6 else ""))
 
         # tipo de cliente
         rep = repeticoes[num] if num else 0
