@@ -11,6 +11,8 @@ Regras:
   - O número após "CTR-" é procurado primeiro como login PPPoE e depois como ID de contrato.
   - Status de acesso Ativo, Bloqueio Automático/Manual e Financeiro em atraso contam como ATIVO.
   - Rede neutra: contrato com plano de venda 67 (Circuito Dedicado) ou número repetido em várias ONUs.
+  - Parceiro Upwire (CTR-201939-...): o status vem do relatório do SGP dele (--sgp). Primeiro pelo
+    número do contrato SGP (CTR-201939-11202), senão pelo nome do cliente (CTR-201939-MONICA).
   - Senhas e demais dados sensíveis do IXC nunca são copiados para a saída.
 """
 import argparse
@@ -24,6 +26,11 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 PLANO_REDE_NEUTRA = 67
+PARCEIRO_SGP = "201939"  # login do contrato da Upwire (MARCELO SILVA DO CARMO) no IXC
+NOME_PARCEIRO_SGP = "Upwire"
+SGP_ATIVO = {"ativo", "suspenso"}
+SGP_DESATIVADO = {"cancelado"}
+SGP_PRE = {"inativo"}  # contrato criado e nunca ativado
 STATUS_ATIVO = {"ativo", "bloqueio automático", "bloqueio manual", "financeiro em atraso"}
 STATUS_DESATIVADO = {"desativado"}
 STATUS_PRE = {"aguardando assinatura"}
@@ -79,6 +86,92 @@ class IXC:
         return self.contratos.get(int(cid)) if cid is not None else None
 
 
+class SGP:
+    """Relatório 'Contrato por Status' do SGP do parceiro (cabeçalho em 'Cliente ID')."""
+
+    def __init__(self, caminho):
+        ws = openpyxl.load_workbook(caminho, read_only=True).active
+        linhas = list(ws.iter_rows(values_only=True))
+        i = next(n for n, r in enumerate(linhas) if r and r[0] == "Cliente ID")
+        cab = linhas[i]
+        self.contratos = {}
+        for r in linhas[i + 1:]:
+            d = dict(zip(cab, r))
+            if isinstance(d.get("Contrato ID"), int):
+                d["Status"] = str(d["Status"] or "").strip()
+                self.contratos[d["Contrato ID"]] = d
+        self.por_cliente = collections.defaultdict(list)
+        for c in self.contratos.values():
+            self.por_cliente[c["Cliente ID"]].append(c)
+
+    def por_nome(self, texto):
+        """Uma palavra: compara com o primeiro nome. Várias: todas precisam estar no nome."""
+        palavras = [compacto(p) for p in re.split(r"[-_. ]+", texto) if len(compacto(p)) >= 3]
+        if not palavras:
+            return []
+        achados = []
+        for c in self.contratos.values():
+            nome = [compacto(p) for p in str(c["Cliente"]).split()]
+            if (len(palavras) == 1 and nome and nome[0] == palavras[0]) or \
+               (len(palavras) > 1 and all(p in nome for p in palavras)):
+                achados.append(c)
+        return achados
+
+
+def classe_sgp(status):
+    s = chave(status)
+    if s in SGP_ATIVO:
+        return "Ativo"
+    if s in SGP_DESATIVADO:
+        return "Desativado"
+    if s in SGP_PRE:
+        return "Pré-contrato"
+    return "Conferir"
+
+
+def fmt_sgp(cs):
+    return "; ".join(f"{c['Contrato ID']} {c['Cliente']} ({c['Status']})" for c in cs[:5])
+
+
+def classificar_sgp(o, sgp):
+    """Substitui o status do contrato do parceiro pelo status do cliente dele no SGP."""
+    o["tipo"] = f"Rede neutra ({NOME_PARCEIRO_SGP})"
+    m = re.match(r"^(\d+)\s*[-_ ]*\s*(.*)$", o["sufixo"])
+    cid, nome = (int(m.group(1)), m.group(2)) if m else (None, o["sufixo"])
+    if cid is not None:
+        c = sgp.contratos.get(cid)
+        if not c:
+            o["classe"] = "Não encontrado"
+            o["obs"].append(f"Contrato {cid} não existe no SGP {NOME_PARCEIRO_SGP}")
+            return
+        candidatos = [c]
+        o["sgp_achado_por"] = "Contrato SGP"
+    else:
+        candidatos = sgp.por_nome(nome)
+        o["sgp_achado_por"] = "Nome"
+        if not candidatos:
+            o["classe"] = "Conferir"
+            o["obs"].append(f"Sem número do contrato SGP e nenhum cliente {NOME_PARCEIRO_SGP} com o nome '{nome}'")
+            return
+        classes = {classe_sgp(c["Status"]) for c in candidatos}
+        if len(candidatos) > 1 and len(classes) > 1:
+            o["classe"] = "Conferir"
+            o["obs"].append(f"Nome '{nome}' bate com vários clientes {NOME_PARCEIRO_SGP}: {fmt_sgp(candidatos)}")
+            return
+    c = candidatos[0]
+    o.update(sgp_contrato=", ".join(str(x["Contrato ID"]) for x in candidatos),
+             sgp_cliente="; ".join(dict.fromkeys(x["Cliente"] for x in candidatos)),
+             sgp_status=c["Status"], status_ixc=f"{c['Status']} (SGP)", classe=classe_sgp(c["Status"]))
+    if len(candidatos) > 1:
+        o["obs"].append(f"Nome '{nome}' bate com {len(candidatos)} contratos, todos {o['classe'].lower()}")
+    if o["classe"] == "Desativado":
+        outros = [x for x in sgp.por_cliente[c["Cliente ID"]]
+                  if x not in candidatos and classe_sgp(x["Status"]) == "Ativo"]
+        if outros:
+            o["classe"] = "Conferir"
+            o["obs"].append(f"Contrato cancelado, mas o cliente tem outro contrato ativo no SGP: {fmt_sgp(outros)}")
+
+
 # ---------------------------------------------------------------- classificação
 
 def extrair_numero(descricao):
@@ -118,7 +211,7 @@ def sugerir_cliente(ixc, descricao):
                      for nome, v in list(achados.items())[:3])
 
 
-def classificar(onus, ixc):
+def classificar(onus, ixc, sgp=None):
     repeticoes = collections.Counter(extrair_numero(o["descricao"])[0] for o in onus)
     descricoes = collections.Counter(o["descricao"].upper().replace("ID", "") for o in onus)
 
@@ -179,6 +272,9 @@ def classificar(onus, ixc):
             if rep == 2:
                 o["obs"].append("Mesmo número em 2 ONUs desta OLT")
 
+        if sgp and num == PARCEIRO_SGP:
+            classificar_sgp(o, sgp)
+
         if descricoes[o["descricao"].upper().replace("ID", "")] > 1:
             o["obs"].append("Descrição duplicada nesta OLT (possível ONU antiga não removida)")
 
@@ -190,7 +286,7 @@ def classificar(onus, ixc):
         if o["classe"] == "Ativo" and o.get("login_ativo") == "Não":
             o["obs"].append("Contrato ativo, mas o login PPPoE está desabilitado no IXC")
         if o["classe"] == "Ativo" and chave(o.get("status_ixc")) != "ativo":
-            o["obs"].append(f"Status no IXC: {o['status_ixc']}")
+            o["obs"].append(f"Status: {o['status_ixc']}")
     return onus
 
 
@@ -205,9 +301,14 @@ COLUNAS = [
     ("PON", "pon", 9), ("ONU ID", "onu_id", 8), ("Serial", "serial", 15), ("Estado ONU", "estado", 11),
     ("Descrição na OLT", "descricao", 38), ("Contrato IXC", "contrato", 11), ("Login PPPoE", "login", 16),
     ("Cliente", "cliente", 40), ("Plano", "plano", 40), ("Tipo", "tipo", 20),
+    (f"Contrato {NOME_PARCEIRO_SGP} (SGP)", "sgp_contrato", 14), (f"Cliente {NOME_PARCEIRO_SGP}", "sgp_cliente", 36),
     ("Status acesso IXC", "status_ixc", 20), ("Classificação", "classe", 15),
     ("Achado por", "achado_por", 11), ("Observações", "obs", 70),
 ]
+
+
+def letra(campo, colunas=COLUNAS):
+    return get_column_letter([k for _, k, _ in colunas].index(campo) + 1)
 
 
 def fmt_cab(ws, linha, ncols):
@@ -272,7 +373,7 @@ def gerar_limpeza(nome_olt, onus, destino):
             for c_ in (1, 2):
                 ws.cell(i, c_).font = Font(name=FONTE, bold=True)
         else:
-            ws.cell(i, 2, f"=COUNTIF(Todas!L:L,A{i})")
+            ws.cell(i, 2, f"=COUNTIF(Todas!{letra('classe')}:{letra('classe')},A{i})")
             ws.cell(i, 1).fill = PatternFill("solid", start_color=CORES[a])
         for c_ in (1, 2, 3):
             if i > 4 and a != "Total":
@@ -283,7 +384,10 @@ def gerar_limpeza(nome_olt, onus, destino):
         "Ativo = status de acesso Ativo, Bloqueio Automático/Manual ou Financeiro em atraso (bloqueado conta como ativo).",
         f"Rede neutra = plano de venda {PLANO_REDE_NEUTRA} (Circuito Dedicado). 'Provável' = mesmo número em 3 ou mais ONUs.",
         "Uma ONU de rede neutra segue o status do contrato do provedor parceiro.",
-        "Fonte: relatórios de contrato e de login exportados do IXC (fornecidos pelo usuário).",
+        f"Exceção {NOME_PARCEIRO_SGP} (CTR-{PARCEIRO_SGP}-...): segue o status do cliente no SGP do parceiro, "
+        "buscado pelo nº do contrato SGP e, sem número, pelo nome. Cancelado = remover; Suspenso = ativo; "
+        "Inativo (nunca ativado) = pré-contrato.",
+        f"Fonte: relatórios de contrato e de login do IXC (CCS Brasil) e de contratos do SGP {NOME_PARCEIRO_SGP} (fornecidos pelo usuário).",
     ]
     for i, r in enumerate(regras, 13):
         ws.cell(i, 1, f"• {r}").font = Font(name=FONTE)
@@ -307,6 +411,8 @@ def gerar_ativos(nome_olt, onus, destino):
     titulo(ws, f"{nome_olt} — Clientes ativos",
            "ONUs com contrato ativo no IXC (bloqueados contam como ativos). Desativados e não identificados ficam fora.")
 
+    colunas = [c for c in COLUNAS if c[1] not in ("achado_por",)]
+    T, E, K = letra("tipo", colunas), letra("estado", colunas), letra("contrato", colunas)
     pons = sorted({o["pon"] for o in ativos}, key=lambda p: tuple(int(x) for x in p.split("/")))
     cab = ["PON", "ONUs ativas", "Cliente final", "Rede neutra", "Online (Up)", "Offline (Down)"]
     for c, v in enumerate(cab, 1):
@@ -315,10 +421,10 @@ def gerar_ativos(nome_olt, onus, destino):
     for i, pon in enumerate(pons, 5):
         ws.cell(i, 1, pon)
         ws.cell(i, 2, f"=COUNTIF(Ativos!A:A,A{i})")
-        ws.cell(i, 3, f'=COUNTIFS(Ativos!A:A,A{i},Ativos!J:J,"Cliente final")')
-        ws.cell(i, 4, f'=COUNTIFS(Ativos!A:A,A{i},Ativos!J:J,"Rede neutra*")')
-        ws.cell(i, 5, f'=COUNTIFS(Ativos!A:A,A{i},Ativos!D:D,"Up")')
-        ws.cell(i, 6, f'=COUNTIFS(Ativos!A:A,A{i},Ativos!D:D,"Down")')
+        ws.cell(i, 3, f'=COUNTIFS(Ativos!A:A,A{i},Ativos!{T}:{T},"Cliente final")')
+        ws.cell(i, 4, f'=COUNTIFS(Ativos!A:A,A{i},Ativos!{T}:{T},"Rede neutra*")')
+        ws.cell(i, 5, f'=COUNTIFS(Ativos!A:A,A{i},Ativos!{E}:{E},"Up")')
+        ws.cell(i, 6, f'=COUNTIFS(Ativos!A:A,A{i},Ativos!{E}:{E},"Down")')
     tot = 5 + len(pons)
     ws.cell(tot, 1, "Total")
     for c in range(2, 7):
@@ -338,12 +444,11 @@ def gerar_ativos(nome_olt, onus, destino):
     grupos = collections.Counter((o["contrato"], o["cliente"], o["tipo"]) for o in ativos)
     for i, ((cid, cli, tipo), _) in enumerate(sorted(grupos.items(), key=lambda kv: -kv[1]), r0 + 1):
         ws.cell(i, 1, cid); ws.cell(i, 2, cli); ws.cell(i, 3, tipo)
-        ws.cell(i, 4, f"=COUNTIF(Ativos!F:F,A{i})")
+        ws.cell(i, 4, f"=COUNTIF(Ativos!{K}:{K},A{i})")
         for c in range(1, 5):
             ws.cell(i, c).font = Font(name=FONTE)
     ws.column_dimensions["B"].width = 45
 
-    colunas = [c for c in COLUNAS if c[1] not in ("achado_por",)]
     aba_lista(wb, "Ativos", ordenar(ativos), colunas)
     wb.save(destino)
     return ativos
@@ -355,6 +460,7 @@ def main():
     ap.add_argument("--logins", type=Path, required=True)
     ap.add_argument("--contratos", type=Path, required=True)
     ap.add_argument("--saida", type=Path, default=Path("saida"))
+    ap.add_argument("--sgp", type=Path, help=f"Relatório de contratos do SGP da {NOME_PARCEIRO_SGP}")
     ap.add_argument("--fabricante", choices=sorted(LEITORES))
     ap.add_argument("--nome", help="Nome da OLT (padrão: nome do arquivo)")
     a = ap.parse_args()
@@ -364,7 +470,7 @@ def main():
     if not onus:
         raise SystemExit("Nenhuma ONU encontrada no arquivo.")
     nome = a.nome or a.olt.stem
-    onus = ordenar(classificar(onus, IXC(a.logins, a.contratos)))
+    onus = ordenar(classificar(onus, IXC(a.logins, a.contratos), SGP(a.sgp) if a.sgp else None))
 
     a.saida.mkdir(parents=True, exist_ok=True)
     gerar_limpeza(nome, onus, a.saida / f"{nome}_limpeza.xlsx")

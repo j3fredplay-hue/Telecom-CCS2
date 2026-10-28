@@ -11,6 +11,7 @@
 python3 olt_ixc.py dados/olts/OLT1-SHOPMILLENNIUM.txt \
   --logins dados/ixc/Relatorio_com_Login.xlsx \
   --contratos dados/ixc/Relatorio_de_contrato_do_IXC.xlsx \
+  --sgp dados/ixc/Relatorio_Upwire_SGP.xlsx \
   --saida saida/
 ```
 
@@ -21,6 +22,7 @@ Formatos de OLT suportados: Datacom (saída de `show interface gpon 1/1/ onu`). 
 - O número após `CTR-` é buscado primeiro como **login PPPoE** e depois como **ID de contrato**.
 - Ativo = status de acesso Ativo, Bloqueio Automático/Manual ou Financeiro em atraso.
 - Rede neutra = plano de venda 67 (Circuito Dedicado); "provável" quando o mesmo número aparece em 3 ou mais ONUs.
+- Parceiro Upwire (`CTR-201939-...`, contrato MARCELO SILVA DO CARMO): o status vem do relatório do SGP do parceiro (`--sgp`), pelo nº do contrato SGP (`CTR-201939-11202`) ou, sem número, pelo nome (`CTR-201939-MONICA`). Cancelado = remover, Suspenso = ativo, Inativo = pré-contrato. Nome ambíguo ou cliente com outro contrato ativo vai para "Conferir".
 - Senhas e outros dados sensíveis do IXC nunca vão para a saída.
 
 As pastas `dados/` e `saida/` ficam fora do git porque têm dados de clientes.
