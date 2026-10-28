@@ -1,0 +1,377 @@
+#!/usr/bin/env python3
+"""Cruza as ONUs de uma OLT com os relatórios do IXC e gera os Excel de limpeza e de ativos.
+
+Uso:
+    python3 olt_ixc.py dados/olts/OLT1-SHOPMILLENNIUM.txt \
+        --logins dados/ixc/Relatorio_com_Login.xlsx \
+        --contratos dados/ixc/Relatorio_de_contrato_do_IXC.xlsx \
+        --saida saida/
+
+Regras:
+  - O número após "CTR-" é procurado primeiro como login PPPoE e depois como ID de contrato.
+  - Status de acesso Ativo, Bloqueio Automático/Manual e Financeiro em atraso contam como ATIVO.
+  - Rede neutra: contrato com plano de venda 67 (Circuito Dedicado) ou número repetido em várias ONUs.
+  - Senhas e demais dados sensíveis do IXC nunca são copiados para a saída.
+"""
+import argparse
+import collections
+import re
+import unicodedata
+from pathlib import Path
+
+import openpyxl
+from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
+
+PLANO_REDE_NEUTRA = 67
+STATUS_ATIVO = {"ativo", "bloqueio automático", "bloqueio manual", "financeiro em atraso"}
+STATUS_DESATIVADO = {"desativado"}
+STATUS_PRE = {"aguardando assinatura"}
+
+FONTE = "Arial"
+
+
+# ---------------------------------------------------------------- leitura das OLTs
+
+def ler_datacom(texto):
+    """Saída de `show interface gpon 1/1/ onu` do DmOS."""
+    padrao = re.compile(r"^(\d+/\d+/\d+)\s+(\d+)\s+(\S+)\s+(Up|Down)\s+\S+\s*(.*)$", re.I)
+    onus = []
+    for linha in texto.splitlines():
+        m = padrao.match(linha.strip())
+        if m:
+            pon, onu_id, serial, estado, nome = m.groups()
+            onus.append({"pon": pon, "onu_id": int(onu_id), "serial": serial,
+                         "estado": estado.capitalize(), "descricao": nome.strip()})
+    return onus
+
+
+LEITORES = {"datacom": ler_datacom}
+
+
+def detectar_fabricante(texto):
+    if "Software Download State" in texto or re.search(r"^\d+/\d+/\d+\s+\d+\s+", texto, re.M):
+        return "datacom"
+    raise SystemExit("Formato de OLT não reconhecido. Informe --fabricante.")
+
+
+# ---------------------------------------------------------------- leitura do IXC
+
+def ler_planilha(caminho):
+    ws = openpyxl.load_workbook(caminho, read_only=True).active
+    linhas = ws.iter_rows(values_only=True)
+    cab = next(linhas)
+    return [dict(zip(cab, r)) for r in linhas if any(v is not None for v in r)]
+
+
+def chave(valor):
+    return str(valor).strip().lower() if valor is not None else ""
+
+
+class IXC:
+    def __init__(self, arq_logins, arq_contratos):
+        self.contratos = {int(r["ID"]): r for r in ler_planilha(arq_contratos)}
+        self.logins = collections.defaultdict(list)
+        for r in ler_planilha(arq_logins):
+            self.logins[chave(r["Login"])].append(r)
+
+    def contrato(self, cid):
+        return self.contratos.get(int(cid)) if cid is not None else None
+
+
+# ---------------------------------------------------------------- classificação
+
+def extrair_numero(descricao):
+    """CTR-555, CTR-555-NOME, C-TR-555, CTR555, 555-NOME → '555'."""
+    m = re.match(r"^\s*C-?TR\s*[-_ ]?\s*(\d+)(.*)$", descricao, re.I) or re.match(r"^\s*(\d+)(.*)$", descricao)
+    if not m:
+        return None, descricao
+    return m.group(1), m.group(2).strip(" -_.")
+
+
+def classe_status(status_acesso):
+    s = chave(status_acesso)
+    if s in STATUS_ATIVO:
+        return "Ativo"
+    if s in STATUS_DESATIVADO:
+        return "Desativado"
+    if s in STATUS_PRE:
+        return "Pré-contrato"
+    return "Conferir"
+
+
+def compacto(txt):
+    txt = unicodedata.normalize("NFKD", str(txt or "")).encode("ascii", "ignore").decode()
+    return re.sub(r"[^A-Z0-9]", "", txt.upper())
+
+
+def sugerir_cliente(ixc, descricao):
+    """Para descrições sem número: procura clientes cujo nome contenha uma palavra da descrição."""
+    partes = [compacto(p) for p in re.split(r"[-_. ]+", descricao) if p.upper() not in ("CTR", "C")]
+    partes = [p for p in partes if len(p) >= 5] or [compacto(descricao.replace("CTR", ""))]
+    achados = {}
+    for cid, c in ixc.contratos.items():
+        nome = compacto(c["Cliente"])
+        if any(p and len(p) >= 5 and (p in nome or (len(nome) >= 8 and nome in p)) for p in partes):
+            achados.setdefault(c["Cliente"], []).append((cid, c["Status acesso"]))
+    return "; ".join(f"{nome} (contrato {', '.join(f'{i}/{s}' for i, s in v[:3])})"
+                     for nome, v in list(achados.items())[:3])
+
+
+def classificar(onus, ixc):
+    repeticoes = collections.Counter(extrair_numero(o["descricao"])[0] for o in onus)
+    descricoes = collections.Counter(o["descricao"].upper().replace("ID", "") for o in onus)
+
+    for o in onus:
+        num, sufixo = extrair_numero(o["descricao"])
+        o.update(numero=num, sufixo=sufixo, contrato=None, login=None, cliente=None, plano=None,
+                 status_ixc=None, login_ativo=None, achado_por=None, obs=[])
+
+        if num is None:
+            o["classe"] = "Conferir"
+            o["obs"].append("Descrição sem número de contrato/login")
+            sug = sugerir_cliente(ixc, o["descricao"])
+            if sug:
+                o["obs"].append(f"Possível cliente: {sug}")
+        else:
+            por_login = ixc.logins.get(num, [])
+            por_contrato = ixc.contrato(num)
+            cids_login = {r["ID contrato"] for r in por_login}
+
+            if por_login and por_contrato and int(num) not in cids_login:
+                c_login = ixc.contrato(next(iter(cids_login)))
+                mesmo_cliente = c_login and compacto(c_login["Cliente"]) == compacto(por_contrato["Cliente"])
+                if not mesmo_cliente:
+                    o["obs"].append(f"Número {num} é login do contrato {sorted(cids_login)} e também é o "
+                                    f"contrato {num} ({por_contrato['Cliente']}) — conferir")
+                    o["conflito"] = True
+
+            if por_login:
+                r = por_login[0]
+                c = ixc.contrato(r["ID contrato"])
+                o.update(contrato=r["ID contrato"], login=r["Login"], achado_por="Login",
+                         login_ativo=r.get("Ativo"))
+                if len(cids_login) > 1:
+                    o["obs"].append(f"Login existe em mais de um contrato: {sorted(cids_login)}")
+            elif por_contrato:
+                c = por_contrato
+                o.update(contrato=num and int(num), achado_por="Contrato")
+            else:
+                c = None
+
+            if c:
+                o.update(cliente=c["Cliente"], plano=c["Descrição"], plano_id=c["Plano de venda"],
+                         status_ixc=c["Status acesso"], status_contrato=c["Status contrato"])
+                o["classe"] = "Conferir" if o.get("conflito") else classe_status(c["Status acesso"])
+            else:
+                o["classe"] = "Não encontrado"
+                o["obs"].append("Número não existe no IXC como login nem como contrato")
+
+        # tipo de cliente
+        rep = repeticoes[num] if num else 0
+        if o.get("plano_id") == PLANO_REDE_NEUTRA:
+            o["tipo"] = "Rede neutra"
+        elif rep >= 3:
+            o["tipo"] = "Rede neutra (provável)"
+            o["obs"].append(f"Mesmo número em {rep} ONUs desta OLT")
+        else:
+            o["tipo"] = "Cliente final"
+            if rep == 2:
+                o["obs"].append("Mesmo número em 2 ONUs desta OLT")
+
+        if descricoes[o["descricao"].upper().replace("ID", "")] > 1:
+            o["obs"].append("Descrição duplicada nesta OLT (possível ONU antiga não removida)")
+
+        # alertas de estado da ONU
+        if o["classe"] == "Desativado" and o["estado"] == "Up":
+            o["obs"].append("ONU ONLINE com contrato desativado — confirmar antes de remover")
+        if o["classe"] == "Ativo" and o["estado"] == "Down":
+            o["obs"].append("Cliente ativo com ONU offline")
+        if o["classe"] == "Ativo" and o.get("login_ativo") == "Não":
+            o["obs"].append("Contrato ativo, mas o login PPPoE está desabilitado no IXC")
+        if o["classe"] == "Ativo" and chave(o.get("status_ixc")) != "ativo":
+            o["obs"].append(f"Status no IXC: {o['status_ixc']}")
+    return onus
+
+
+# ---------------------------------------------------------------- Excel
+
+AZUL = PatternFill("solid", start_color="1F4E78")
+CINZA = PatternFill("solid", start_color="F2F2F2")
+CORES = {"Ativo": "E2EFDA", "Desativado": "FCE4D6", "Conferir": "FFF2CC",
+         "Não encontrado": "FFF2CC", "Pré-contrato": "DDEBF7"}
+
+COLUNAS = [
+    ("PON", "pon", 9), ("ONU ID", "onu_id", 8), ("Serial", "serial", 15), ("Estado ONU", "estado", 11),
+    ("Descrição na OLT", "descricao", 38), ("Contrato IXC", "contrato", 11), ("Login PPPoE", "login", 16),
+    ("Cliente", "cliente", 40), ("Plano", "plano", 40), ("Tipo", "tipo", 20),
+    ("Status acesso IXC", "status_ixc", 20), ("Classificação", "classe", 15),
+    ("Achado por", "achado_por", 11), ("Observações", "obs", 70),
+]
+
+
+def fmt_cab(ws, linha, ncols):
+    for c in range(1, ncols + 1):
+        cel = ws.cell(linha, c)
+        cel.font = Font(name=FONTE, bold=True, color="FFFFFF")
+        cel.fill = AZUL
+        cel.alignment = Alignment(vertical="center", wrap_text=True)
+
+
+def aba_lista(wb, titulo, onus, colunas=COLUNAS):
+    ws = wb.create_sheet(titulo)
+    for i, (nome, _, larg) in enumerate(colunas, 1):
+        ws.cell(1, i, nome)
+        ws.column_dimensions[get_column_letter(i)].width = larg
+    fmt_cab(ws, 1, len(colunas))
+    col_classe = [k for _, k, _ in colunas].index("classe") + 1
+    for r, o in enumerate(onus, 2):
+        for c, (_, campo, _) in enumerate(colunas, 1):
+            v = o.get(campo)
+            if isinstance(v, list):
+                v = " | ".join(v)
+            ws.cell(r, c, v).font = Font(name=FONTE)
+        cor = CORES.get(o.get("classe"))
+        if cor:
+            ws.cell(r, col_classe).fill = PatternFill("solid", start_color=cor)
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = f"A1:{get_column_letter(len(colunas))}{max(len(onus) + 1, 1)}"
+    return ws
+
+
+def titulo(ws, texto, sub):
+    ws["A1"] = texto
+    ws["A1"].font = Font(name=FONTE, bold=True, size=14)
+    ws["A2"] = sub
+    ws["A2"].font = Font(name=FONTE, italic=True, color="595959")
+
+
+def ordenar(onus):
+    return sorted(onus, key=lambda o: (tuple(int(x) for x in o["pon"].split("/")), o["onu_id"]))
+
+
+def gerar_limpeza(nome_olt, onus, destino):
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Resumo"
+    titulo(ws, f"{nome_olt} — Limpeza de ONUs", "Cruzamento da descrição das ONUs com os relatórios do IXC")
+    linhas = [("Classificação", "Qtd. ONUs", "O que fazer"),
+              ("Desativado", None, "Remover da OLT (aba 'Remover'). Veja a coluna Observações antes."),
+              ("Não encontrado", None, "Número não existe no IXC. Verificar e, se for o caso, remover."),
+              ("Conferir", None, "Descrição sem número ou ambígua. Identificar o cliente."),
+              ("Pré-contrato", None, "Aguardando assinatura. Manter."),
+              ("Ativo", None, "Manter. Vão para o relatório de ativos."),
+              ("Total", None, None)]
+    for i, (a, b, c) in enumerate(linhas, 4):
+        ws.cell(i, 1, a); ws.cell(i, 3, c)
+        if i == 4:
+            ws.cell(i, 2, b)
+            fmt_cab(ws, 4, 3)
+        elif a == "Total":
+            ws.cell(i, 2, f"=SUM(B5:B{i - 1})")
+            for c_ in (1, 2):
+                ws.cell(i, c_).font = Font(name=FONTE, bold=True)
+        else:
+            ws.cell(i, 2, f"=COUNTIF(Todas!L:L,A{i})")
+            ws.cell(i, 1).fill = PatternFill("solid", start_color=CORES[a])
+        for c_ in (1, 2, 3):
+            if i > 4 and a != "Total":
+                ws.cell(i, c_).font = Font(name=FONTE)
+    ws.cell(12, 1, "Regras usadas").font = Font(name=FONTE, bold=True)
+    regras = [
+        "O número após 'CTR-' é procurado primeiro como login PPPoE e depois como ID de contrato.",
+        "Ativo = status de acesso Ativo, Bloqueio Automático/Manual ou Financeiro em atraso (bloqueado conta como ativo).",
+        f"Rede neutra = plano de venda {PLANO_REDE_NEUTRA} (Circuito Dedicado). 'Provável' = mesmo número em 3 ou mais ONUs.",
+        "Uma ONU de rede neutra segue o status do contrato do provedor parceiro.",
+        "Fonte: relatórios de contrato e de login exportados do IXC (fornecidos pelo usuário).",
+    ]
+    for i, r in enumerate(regras, 13):
+        ws.cell(i, 1, f"• {r}").font = Font(name=FONTE)
+    ws.column_dimensions["A"].width = 18
+    ws.column_dimensions["B"].width = 11
+    ws.column_dimensions["C"].width = 70
+
+    remover = [o for o in onus if o["classe"] == "Desativado"]
+    conferir = [o for o in onus if o["classe"] in ("Conferir", "Não encontrado")]
+    aba_lista(wb, "Remover", remover)
+    aba_lista(wb, "Conferir", conferir)
+    aba_lista(wb, "Todas", onus)
+    wb.save(destino)
+
+
+def gerar_ativos(nome_olt, onus, destino):
+    ativos = [o for o in onus if o["classe"] in ("Ativo", "Pré-contrato")]
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Resumo"
+    titulo(ws, f"{nome_olt} — Clientes ativos",
+           "ONUs com contrato ativo no IXC (bloqueados contam como ativos). Desativados e não identificados ficam fora.")
+
+    pons = sorted({o["pon"] for o in ativos}, key=lambda p: tuple(int(x) for x in p.split("/")))
+    cab = ["PON", "ONUs ativas", "Cliente final", "Rede neutra", "Online (Up)", "Offline (Down)"]
+    for c, v in enumerate(cab, 1):
+        ws.cell(4, c, v)
+    fmt_cab(ws, 4, len(cab))
+    for i, pon in enumerate(pons, 5):
+        ws.cell(i, 1, pon)
+        ws.cell(i, 2, f"=COUNTIF(Ativos!A:A,A{i})")
+        ws.cell(i, 3, f'=COUNTIFS(Ativos!A:A,A{i},Ativos!J:J,"Cliente final")')
+        ws.cell(i, 4, f'=COUNTIFS(Ativos!A:A,A{i},Ativos!J:J,"Rede neutra*")')
+        ws.cell(i, 5, f'=COUNTIFS(Ativos!A:A,A{i},Ativos!D:D,"Up")')
+        ws.cell(i, 6, f'=COUNTIFS(Ativos!A:A,A{i},Ativos!D:D,"Down")')
+    tot = 5 + len(pons)
+    ws.cell(tot, 1, "Total")
+    for c in range(2, 7):
+        ws.cell(tot, c, f"=SUM({get_column_letter(c)}5:{get_column_letter(c)}{tot - 1})")
+    for r in range(5, tot + 1):
+        for c in range(1, 7):
+            ws.cell(r, c).font = Font(name=FONTE, bold=(r == tot))
+    for c, w in zip("ABCDEF", (12, 13, 13, 13, 13, 14)):
+        ws.column_dimensions[c].width = w
+
+    # ranking por contrato/provedor
+    r0 = tot + 3
+    ws.cell(r0 - 1, 1, "ONUs por cliente / provedor").font = Font(name=FONTE, bold=True)
+    for c, v in enumerate(["Contrato", "Cliente / provedor", "Tipo", "ONUs"], 1):
+        ws.cell(r0, c, v)
+    fmt_cab(ws, r0, 4)
+    grupos = collections.Counter((o["contrato"], o["cliente"], o["tipo"]) for o in ativos)
+    for i, ((cid, cli, tipo), _) in enumerate(sorted(grupos.items(), key=lambda kv: -kv[1]), r0 + 1):
+        ws.cell(i, 1, cid); ws.cell(i, 2, cli); ws.cell(i, 3, tipo)
+        ws.cell(i, 4, f"=COUNTIF(Ativos!F:F,A{i})")
+        for c in range(1, 5):
+            ws.cell(i, c).font = Font(name=FONTE)
+    ws.column_dimensions["B"].width = 45
+
+    colunas = [c for c in COLUNAS if c[1] not in ("achado_por",)]
+    aba_lista(wb, "Ativos", ordenar(ativos), colunas)
+    wb.save(destino)
+    return ativos
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("olt", type=Path)
+    ap.add_argument("--logins", type=Path, required=True)
+    ap.add_argument("--contratos", type=Path, required=True)
+    ap.add_argument("--saida", type=Path, default=Path("saida"))
+    ap.add_argument("--fabricante", choices=sorted(LEITORES))
+    ap.add_argument("--nome", help="Nome da OLT (padrão: nome do arquivo)")
+    a = ap.parse_args()
+
+    texto = a.olt.read_text(encoding="utf-8", errors="replace")
+    onus = LEITORES[a.fabricante or detectar_fabricante(texto)](texto)
+    if not onus:
+        raise SystemExit("Nenhuma ONU encontrada no arquivo.")
+    nome = a.nome or a.olt.stem
+    onus = ordenar(classificar(onus, IXC(a.logins, a.contratos)))
+
+    a.saida.mkdir(parents=True, exist_ok=True)
+    gerar_limpeza(nome, onus, a.saida / f"{nome}_limpeza.xlsx")
+    gerar_ativos(nome, onus, a.saida / f"{nome}_ativos.xlsx")
+    cont = collections.Counter(o["classe"] for o in onus)
+    print(f"{nome}: {len(onus)} ONUs — " + ", ".join(f"{k}: {v}" for k, v in cont.most_common()))
+
+
+if __name__ == "__main__":
+    main()
