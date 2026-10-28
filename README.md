@@ -3,7 +3,7 @@
 `olt_ixc.py` cruza a lista de ONUs de uma OLT com os relatórios exportados do IXC e gera, por OLT:
 
 - `<OLT>_limpeza.xlsx`: resumo, ONUs a **remover** (contrato desativado), ONUs a **conferir** (sem número, número inexistente no IXC, ambíguas) e a lista completa.
-- `<OLT>_ativos.xlsx`: relatório para engenharia, com resumo por PON (cliente final x rede neutra, online x offline), ONUs por cliente/provedor e a lista de ativos.
+- `<OLT>_ativos.xlsx`: relatório de clientes ativos, com resumo por PON (cliente final x rede neutra, online x offline), ONUs por cliente/provedor e a lista de ativos.
 
 ## Uso
 

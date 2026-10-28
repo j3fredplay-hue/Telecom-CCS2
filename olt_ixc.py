@@ -32,6 +32,21 @@ NOME_PARCEIRO_SGP = "Upwire"
 NUMEROS_ANTIGOS = {
     "2023716": 538,  # ID HOUSE TECNOLOGIA E CERTIFICACAO LTDA
 }
+# Descrições só com nome → ID do contrato no IXC (confirmadas pelo usuário). Compara sem espaços/pontuação.
+NOMES_CONHECIDOS = [
+    ("PLANODESAUDEWINK", 247),  # cliente da WINK (rede neutra)
+    ("SANTOSEVIDAL", 2),        # LABORATORIO SANTOS E VIDAL
+    ("IDHOUSE", 538),           # ID HOUSE TECNOLOGIA E CERTIFICACAO
+    ("STAFF", 64),              # STAFF CONSTRUCOES
+    ("BOBS", 102),              # PN REDE SAUDAVEL (Bob's)
+    ("CPDE", 189),              # CENTRO DE PESQUISA E DIAGNOSTICOS ESPECIALIZADOS
+]
+
+# Decisões pontuais do usuário, por serial da ONU: (classificação, motivo).
+DECISOES_MANUAIS = {
+    "VSOL00CD28FB": ("Desativado", "CTR-201939-REBECA: ONU offline e PPPoE online por outro caminho — não usa esta OLT"),
+}
+
 SGP_ATIVO = {"ativo", "suspenso"}
 SGP_DESATIVADO = {"cancelado"}
 SGP_PRE = {"inativo"}  # contrato criado e nunca ativado
@@ -225,14 +240,25 @@ def classificar(onus, ixc, sgp=None):
                  status_ixc=None, login_ativo=None, achado_por=None, obs=[])
 
         if num is None:
-            o["classe"] = "Conferir"
-            o["obs"].append("Descrição sem número de contrato/login")
-            if "NOVASOLU" in compacto(o["descricao"]):
-                o["obs"].append("Ex-Nova Solutec: pode ser cliente CCS ou Upwire e estar configurado por VLAN "
-                                "(/30 ou /29), sem login PPPoE")
-            sug = sugerir_cliente(ixc, o["descricao"])
-            if sug:
-                o["obs"].append(f"Possível cliente: {sug}")
+            desc = compacto(o["descricao"])
+            cid = next((i for nome, i in NOMES_CONHECIDOS if nome in desc), None)
+            c = ixc.contrato(cid)
+            if c:
+                o.update(contrato=cid, achado_por="Nome", cliente=c["Cliente"], plano=c["Descrição"],
+                         plano_id=c["Plano de venda"], status_ixc=c["Status acesso"])
+                o["classe"] = classe_status(c["Status acesso"])
+            elif o["estado"] == "Down":
+                o["classe"] = "Desativado"
+                o["obs"].append("Descrição sem número e sem cliente identificado, ONU offline")
+            else:
+                o["classe"] = "Conferir"
+                o["obs"].append("Descrição sem número e sem cliente identificado, ONU online")
+                if "NOVASOLU" in desc:
+                    o["obs"].append("Ex-Nova Solutec: pode ser cliente CCS ou Upwire e estar configurado por VLAN "
+                                    "(/30 ou /29), sem login PPPoE")
+                sug = sugerir_cliente(ixc, o["descricao"])
+                if sug:
+                    o["obs"].append(f"Possível cliente: {sug}")
         else:
             por_login = ixc.logins.get(num, [])
             por_contrato = ixc.contrato(num)
@@ -250,7 +276,7 @@ def classificar(onus, ixc, sgp=None):
                 r = por_login[0]
                 c = ixc.contrato(r["ID contrato"])
                 o.update(contrato=r["ID contrato"], login=r["Login"], achado_por="Login",
-                         login_ativo=r.get("Ativo"))
+                         login_ativo=r.get("Ativo"), ult_conexao=r.get("Última conexão inicial"))
                 if len(cids_login) > 1:
                     o["obs"].append(f"Login existe em mais de um contrato: {sorted(cids_login)}")
             elif por_contrato:
@@ -267,9 +293,9 @@ def classificar(onus, ixc, sgp=None):
                          status_ixc=c["Status acesso"], status_contrato=c["Status contrato"])
                 o["classe"] = "Conferir" if o.get("conflito") else classe_status(c["Status acesso"])
             else:
-                o["classe"] = "Não encontrado"
                 o["obs"].append("Número não existe no IXC como login nem como contrato"
-                                + (" (nº do sistema antigo da CCS Brasil)" if len(num) >= 6 else ""))
+                                " (nº do sistema antigo da CCS Brasil)")
+                o["classe"] = "Desativado" if o["estado"] == "Down" else "Não encontrado"
 
         # tipo de cliente
         rep = repeticoes[num] if num else 0
@@ -289,11 +315,34 @@ def classificar(onus, ixc, sgp=None):
         if descricoes[o["descricao"].upper().replace("ID", "")] > 1:
             o["obs"].append("Descrição duplicada nesta OLT (possível ONU antiga não removida)")
 
-        # alertas de estado da ONU
+    # ONU antiga trocada: mesmo login (cliente final) ou mesma descrição (rede neutra) online em outra ONU
+    def grupo(o):
+        if o["tipo"] == "Cliente final" and o.get("login") is not None:
+            return ("login", chave(o["login"]))
+        return ("desc", o["descricao"].upper().replace("ID", "").rstrip(" -_."))
+    online = collections.defaultdict(list)
+    for o in onus:
+        if o["estado"] == "Up":
+            online[grupo(o)].append(o)
+    for o in onus:
+        outras = online.get(grupo(o))
+        if o["estado"] == "Down" and outras and o["classe"] in ("Ativo", "Conferir", "Não encontrado"):
+            o["classe"] = "Desativado"
+            o["obs"].append("ONU antiga: o mesmo cliente está online em " +
+                            ", ".join(f"{x['pon']} ONU {x['onu_id']} ({x['descricao']})" for x in outras))
+
+    for o in onus:
+        if o["serial"] in DECISOES_MANUAIS:
+            o["classe"], motivo = DECISOES_MANUAIS[o["serial"]]
+            o["obs"] = [motivo]
+
+    for o in onus:  # alertas de estado da ONU
         if o["classe"] == "Desativado" and o["estado"] == "Up":
             o["obs"].append("ONU ONLINE com contrato desativado — confirmar antes de remover")
         if o["classe"] == "Ativo" and o["estado"] == "Down":
-            o["obs"].append("Cliente ativo com ONU offline")
+            ult = o.get("ult_conexao")
+            o["obs"].append("Cliente ativo com ONU offline" +
+                            (f" (última conexão PPPoE: {ult:%d/%m/%Y})" if hasattr(ult, "strftime") else ""))
         if o["classe"] == "Ativo" and o.get("login_ativo") == "Não":
             o["obs"].append("Contrato ativo, mas o login PPPoE está desabilitado no IXC")
         if o["classe"] == "Ativo" and chave(o.get("status_ixc")) != "ativo":
@@ -343,6 +392,8 @@ def aba_lista(wb, titulo, onus, colunas=COLUNAS):
             if isinstance(v, list):
                 v = " | ".join(v)
             ws.cell(r, c, v).font = Font(name=FONTE)
+        if o.get("estado") == "Down":
+            ws.cell(r, [k for _, k, _ in colunas].index("estado") + 1).font = Font(name=FONTE, bold=True, color="C00000")
         cor = CORES.get(o.get("classe"))
         if cor:
             ws.cell(r, col_classe).fill = PatternFill("solid", start_color=cor)
@@ -395,6 +446,8 @@ def gerar_limpeza(nome_olt, onus, destino):
         "Ativo = status de acesso Ativo, Bloqueio Automático/Manual ou Financeiro em atraso (bloqueado conta como ativo).",
         f"Rede neutra = plano de venda {PLANO_REDE_NEUTRA} (Circuito Dedicado). 'Provável' = mesmo número em 3 ou mais ONUs.",
         "Uma ONU de rede neutra segue o status do contrato do provedor parceiro.",
+        "Número que não existe no IXC (sistema antigo) ou descrição sem cliente identificado: offline = remover; online = conferir.",
+        "ONU offline cujo mesmo login (ou mesma descrição, na rede neutra) está online em outra ONU da OLT = ONU antiga, remover.",
         f"Exceção {NOME_PARCEIRO_SGP} (CTR-{PARCEIRO_SGP}-...): segue o status do cliente no SGP do parceiro, "
         "buscado pelo nº do contrato SGP e, sem número, pelo nome. Cancelado = remover; Suspenso = ativo; "
         "Inativo (nunca ativado) = pré-contrato.",
