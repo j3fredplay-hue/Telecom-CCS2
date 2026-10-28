@@ -32,6 +32,13 @@ NOME_PARCEIRO_SGP = "Upwire"
 # Números do sistema antigo da CCS Brasil que não existem como login no IXC → ID do contrato no IXC.
 NUMEROS_ANTIGOS = {
     "2023716": 538,  # ID HOUSE TECNOLOGIA E CERTIFICACAO LTDA
+    "2025928": 364,  # VISION TELECOM SERVIÇO DE COMUNICAÇÃO MULTIMIDIA LTDA
+}
+
+# Contratos de provedores parceiros (rede neutra) que não estão no plano 67.
+PARCEIROS_EXTRA = {
+    130,  # E F ANDRADE FIGUEIREDO LTDA (circuito de transporte)
+    364,  # VISION TELECOM
 }
 # Descrições só com nome → ID do contrato no IXC (confirmadas pelo usuário). Compara sem espaços/pontuação.
 NOMES_CONHECIDOS = [
@@ -45,6 +52,7 @@ NOMES_CONHECIDOS = [
 
 # Decisões pontuais do usuário, por (serial, descrição) da ONU: (classificação, motivo).
 DECISOES_MANUAIS = {
+    ("ITBSE8D0ACDF", "CTR-TESTE"): ("Desativado", "ONU de teste — remover (confirmado pelo usuário)"),
     ("VSOL00CD28FB", "CTR-201939-REBECA"): ("Desativado", "CTR-201939-REBECA: ONU offline e PPPoE online por outro caminho — não usa esta OLT"),
 }
 
@@ -302,7 +310,7 @@ def classificar(onus, ixc, sgp=None, outras_olts=None):
 
         # tipo de cliente
         rep = repeticoes[num] if num else 0
-        if o.get("plano_id") == PLANO_REDE_NEUTRA:
+        if o.get("plano_id") == PLANO_REDE_NEUTRA or o.get("contrato") in PARCEIROS_EXTRA:
             o["tipo"] = "Rede neutra"
         elif rep >= 3:
             o["tipo"] = "Rede neutra (provável)"
@@ -313,6 +321,11 @@ def classificar(onus, ixc, sgp=None, outras_olts=None):
                 o["obs"].append("Mesmo número em 2 ONUs desta OLT")
 
         if sgp and num == PARCEIRO_SGP:
+            classificar_sgp(o, sgp)
+        elif sgp and num and len(num) == 5 and o.get("achado_por") is None and int(num) in sgp.contratos:
+            # cliente Upwire sem o 201939 na descrição (ex.: CTR-11267)
+            o["obs"] = [f"Descrição sem o {PARCEIRO_SGP}: contrato {num} encontrado no SGP {NOME_PARCEIRO_SGP}"]
+            o.update(sufixo=num + ("-" + o["sufixo"] if o["sufixo"] else ""))
             classificar_sgp(o, sgp)
 
         if descricoes[o["descricao"].upper().replace("ID", "")] > 1:
@@ -457,7 +470,7 @@ def aba_pop(wb, nome_olt, onus, pop):
         ws.column_dimensions[c].width = w
 
 
-def gerar_limpeza(nome_olt, onus, destino, pop=None):
+def gerar_limpeza(nome_olt, onus, destino):
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Resumo"
@@ -508,8 +521,6 @@ def gerar_limpeza(nome_olt, onus, destino, pop=None):
     aba_lista(wb, "Remover", remover)
     aba_lista(wb, "Conferir", conferir)
     aba_lista(wb, "Todas", onus)
-    if pop:
-        aba_pop(wb, nome_olt, onus, pop)
     wb.save(destino)
 
 
@@ -600,7 +611,7 @@ def main():
     pop = json.loads(a.pops.read_text(encoding="utf-8")).get(nome) if a.pops.exists() else None
 
     a.saida.mkdir(parents=True, exist_ok=True)
-    gerar_limpeza(nome, onus, a.saida / f"{nome}_limpeza.xlsx", pop)
+    gerar_limpeza(nome, onus, a.saida / f"{nome}_limpeza.xlsx")
     gerar_ativos(nome, onus, a.saida / f"{nome}_ativos.xlsx", pop)
     cont = collections.Counter(o["classe"] for o in onus)
     print(f"{nome}: {len(onus)} ONUs — " + ", ".join(f"{k}: {v}" for k, v in cont.most_common()))
