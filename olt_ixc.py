@@ -51,10 +51,17 @@ NOMES_CONHECIDOS = [
     ("STAFF", 64),              # STAFF CONSTRUCOES
     ("BOBS", 102),              # PN REDE SAUDAVEL (Bob's)
     ("CPDE", 189),              # CENTRO DE PESQUISA E DIAGNOSTICOS ESPECIALIZADOS
+    ("NERDSFIBRA", 512),        # NERDS TELECOM (rede neutra)
+    ("FECHACOM", 253),          # FECHACOM COM DE FECHADURAS
 ]
+
+# Descrições sem contrato identificado que o usuário mandou remover, mesmo online.
+REMOVER_SEM_CONTRATO = ["TINTAO"]
 
 # Decisões pontuais do usuário, por (serial, descrição) da ONU: (classificação, motivo).
 DECISOES_MANUAIS = {
+    ("TPLGCE87505A", ""): ("Desativado", "ONU sem descrição — remover (confirmado pelo usuário)"),
+    ("TPLGCE8750C1", ""): ("Desativado", "ONU sem descrição — remover (confirmado pelo usuário)"),
     ("ITBSE8D0ACDF", "CTR-TESTE"): ("Desativado", "ONU de teste — remover (confirmado pelo usuário)"),
     ("VSOL00CD28FB", "CTR-201939-REBECA"): ("Desativado", "CTR-201939-REBECA: ONU offline e PPPoE online por outro caminho — não usa esta OLT"),
 }
@@ -495,6 +502,11 @@ def classificar(onus, ixc, sgp=None, outras_olts=None):
         if (o["serial"], o["descricao"]) in DECISOES_MANUAIS:
             o["classe"], motivo = DECISOES_MANUAIS[(o["serial"], o["descricao"])]
             o["obs"] = [motivo]
+
+    for o in onus:
+        if o.get("contrato") is None and any(n in compacto(o["descricao"]) for n in REMOVER_SEM_CONTRATO):
+            o["classe"] = "Desativado"
+            o["obs"] = [f"{o['descricao']}: remover (confirmado pelo usuário; sem contrato de rede neutra)"]
 
     for o in onus:  # ambíguo ou não identificado: offline = remover; online continua em Conferir
         if o["classe"] in ("Conferir", "Não encontrado") and o["estado"] == "Down":
