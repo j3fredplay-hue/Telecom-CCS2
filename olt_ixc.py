@@ -126,10 +126,25 @@ def ler_parks(texto):
     return onus
 
 
-LEITORES = {"datacom": ler_datacom, "parks": ler_parks}
+def ler_vsol(texto):
+    """Tabela "ONU list" da web da VSOL (EPON), copiada para o bloco de notas (colunas separadas por TAB).
+    EPON identifica a ONU pelo MAC, que entra no lugar do serial."""
+    onus = []
+    for linha in texto.splitlines():
+        c = [x.strip() for x in linha.split("\t")]
+        m = re.match(r"^[EG]PON(\d+/\d+):(\d+)$", c[0], re.I)
+        if m and len(c) >= 4:
+            onus.append({"pon": m.group(1), "onu_id": int(m.group(2)), "serial": c[2].upper(),
+                         "estado": "Up" if c[1].lower() == "online" else "Down", "descricao": c[3]})
+    return onus
+
+
+LEITORES = {"datacom": ler_datacom, "parks": ler_parks, "vsol": ler_vsol}
 
 
 def detectar_fabricante(texto):
+    if re.search(r"^[EG]PON\d+/\d+:\d+\t", texto, re.M | re.I):
+        return "vsol"
     if re.search(r"^\s*Interface gpon\d+/\d+", texto, re.M):
         return "parks"
     if "Software Download State" in texto or re.search(r"^\d+/\d+/\d+\s+\d+\s+", texto, re.M):
@@ -540,7 +555,7 @@ CORES = {"Ativo": "E2EFDA", "Desativado": "FCE4D6", "Conferir": "FFF2CC",
          "Não encontrado": "FFF2CC", "Pré-contrato": "DDEBF7"}
 
 COLUNAS = [
-    ("PON", "pon", 9), ("ONU ID", "onu_id", 8), ("Serial", "serial", 15), ("Estado ONU", "estado", 11),
+    ("PON", "pon", 9), ("ONU ID", "onu_id", 8), ("Serial/MAC", "serial", 18), ("Estado ONU", "estado", 11),
     ("Descrição na OLT", "descricao", 38), ("Contrato IXC", "contrato", 11), ("Login PPPoE", "login", 16),
     ("Cliente", "cliente", 40), ("Plano", "plano", 40), ("Tipo", "tipo", 20),
     (f"Contrato {NOME_PARCEIRO_SGP} (SGP)", "sgp_contrato", 14), (f"Cliente {NOME_PARCEIRO_SGP}", "sgp_cliente", 36),

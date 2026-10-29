@@ -28,7 +28,7 @@ Depois rodar `recalc.py` (skill xlsx) nos Excel gerados para calcular as fórmul
 
 - **Datacom**: `show interface gpon 1/1/ onu`.
 - **Parks**: `show interface gponX/Y onu` **e** `show interface gponX/Y onu status` no mesmo `.txt` (status ACTIVE = online, INVALID = offline; também lê o sinal óptico).
-- **VSOL**: a fazer (export/print da web).
+- **VSOL (EPON)**: aba "ONU list" da web copiada para o bloco de notas (colunas separadas por TAB). O MAC entra no lugar do serial (coluna "Serial/MAC").
 
 ## Regras combinadas com o usuário
 

@@ -161,5 +161,29 @@
         "obs": "Quantidade de portas não informada"
       }
     ]
+  },
+  "OLT1-DISTRITO1": {
+    "pop": "POP Distrito 1",
+    "portas_pon": null,
+    "equipamentos": [
+      {
+        "equipamento": "OLT",
+        "fabricante": "VSOL",
+        "modelo": "EPON (modelo a definir)",
+        "obs": null
+      },
+      {
+        "equipamento": "Switch",
+        "fabricante": "MikroTik",
+        "modelo": null,
+        "obs": "Modelo não informado"
+      },
+      {
+        "equipamento": "DIO",
+        "fabricante": null,
+        "modelo": null,
+        "obs": "Quantidade de portas não informada"
+      }
+    ]
   }
 }
