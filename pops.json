@@ -175,14 +175,14 @@
       {
         "equipamento": "Switch",
         "fabricante": "MikroTik",
-        "modelo": null,
-        "obs": "Modelo não informado"
+        "modelo": "A definir",
+        "obs": null
       },
       {
         "equipamento": "DIO",
         "fabricante": null,
         "modelo": null,
-        "obs": "Quantidade de portas não informada"
+        "obs": "Quantidade de portas a definir"
       }
     ]
   }

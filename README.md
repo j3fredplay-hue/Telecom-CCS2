@@ -41,7 +41,8 @@ Depois rodar `recalc.py` (skill xlsx) nos Excel gerados para calcular as fórmul
 
 **Classificação**
 - Ativo = Ativo, Bloqueio Automático/Manual, Financeiro em atraso (IXC); Ativo/Suspenso (SGP). Inativo no SGP = pré-contrato (mantém).
-- Desativado (IXC) / Cancelado (SGP) = **remover**. ONU de parceiro segue o status do contrato do parceiro.
+- Desativado (IXC) / Cancelado (SGP) = **remover**.
+- ONU de **parceiro (rede neutra)** nunca vai para remoção: o controle é do parceiro (contrato ativo = Ativo; senão, Conferir). Exceção: clientes da **Upwire** (contrato 388), controlados pela CCS via SGP.
 - Mesmo cliente com um contrato ativo e outro cancelado = ativo.
 - Cliente **não encontrado ou ambíguo**: offline = **remover**; online = **conferir**.
 - ONU offline cujo mesmo login/cliente (ou serial, em outra OLT) está online em outra ONU = ONU antiga, **remover**.

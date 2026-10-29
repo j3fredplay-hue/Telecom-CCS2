@@ -64,6 +64,7 @@ DECISOES_MANUAIS = {
     ("TPLGCE8750C1", ""): ("Desativado", "ONU sem descrição — remover (confirmado pelo usuário)"),
     ("ITBSE8D0ACDF", "CTR-TESTE"): ("Desativado", "ONU de teste — remover (confirmado pelo usuário)"),
     ("VSOL00CD28FB", "CTR-201939-REBECA"): ("Desativado", "CTR-201939-REBECA: ONU offline e PPPoE online por outro caminho — não usa esta OLT"),
+    ("24:2F:D0:06:40:80", "CTR-2024783-8-RAFAELA"): ("Conferir", "Parceiro Manaos (contrato 272): ONU offline — conferir (pedido do usuário)"),
 }
 
 SGP_ATIVO = {"ativo", "suspenso"}
@@ -537,9 +538,16 @@ def classificar(onus, ixc, sgp=None, outras_olts=None):
             o["obs"] = [f"{o['descricao']}: remover (confirmado pelo usuário; sem contrato de rede neutra)"]
 
     for o in onus:  # ambíguo ou não identificado: offline = remover; online continua em Conferir
-        if o["classe"] in ("Conferir", "Não encontrado") and o["estado"] == "Down":
+        if o["classe"] in ("Conferir", "Não encontrado") and o["estado"] == "Down" \
+                and (o["serial"], o["descricao"]) not in DECISOES_MANUAIS:
             o["classe"] = "Desativado"
             o["obs"].append("Não foi possível confirmar o cliente e a ONU está offline")
+
+    for o in onus:  # ONU de parceiro (rede neutra) nunca vai para remoção: o controle é do parceiro.
+        # A Upwire é exceção (os clientes dela são controlados pela CCS, pelo SGP).
+        if o.get("tipo") == "Rede neutra" and o["classe"] == "Desativado" and (o["serial"], o["descricao"]) not in DECISOES_MANUAIS:
+            o["classe"] = "Ativo" if classe_status(o.get("status_ixc") or "") == "Ativo" else "Conferir"
+            o["obs"].append("ONU de parceiro (rede neutra): não remover — o controle é do parceiro")
 
     for o in onus:  # alertas de estado da ONU
         if o.get("perfil"):
