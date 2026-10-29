@@ -128,14 +128,27 @@ def ler_parks(texto):
 
 def ler_vsol(texto):
     """Tabela "ONU list" da web da VSOL (EPON), copiada para o bloco de notas (colunas separadas por TAB).
-    EPON identifica a ONU pelo MAC, que entra no lugar do serial."""
-    onus = []
+    EPON identifica a ONU pelo MAC, que entra no lugar do serial. Se a aba "OPM Diag" vier abaixo no mesmo
+    arquivo (ONU ID, MAC, Descrição, ..., RX Power na última coluna), o RX Power vira o sinal da ONU."""
+    onus, por_id, sinais = [], {}, {}
     for linha in texto.splitlines():
         c = [x.strip() for x in linha.split("\t")]
         m = re.match(r"^[EG]PON(\d+/\d+):(\d+)$", c[0], re.I)
-        if m and len(c) >= 4:
-            onus.append({"pon": m.group(1), "onu_id": int(m.group(2)), "serial": c[2].upper(),
-                         "estado": "Up" if c[1].lower() == "online" else "Down", "descricao": c[3]})
+        if not m or len(c) < 4:
+            continue
+        chave_onu = (m.group(1), int(m.group(2)))
+        if re.fullmatch(r"([0-9A-F]{2}:){5}[0-9A-F]{2}", c[1], re.I):  # linha da OPM Diag
+            try:
+                sinais[chave_onu] = float(c[-1])
+            except ValueError:
+                pass
+        elif chave_onu not in por_id:
+            por_id[chave_onu] = {"pon": m.group(1), "onu_id": int(m.group(2)), "serial": c[2].upper(),
+                                 "estado": "Up" if c[1].lower() == "online" else "Down", "descricao": c[3]}
+            onus.append(por_id[chave_onu])
+    for chave_onu, sinal in sinais.items():
+        if chave_onu in por_id:
+            por_id[chave_onu]["sinal"] = sinal
     return onus
 
 
