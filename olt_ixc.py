@@ -458,6 +458,11 @@ def classificar(onus, ixc, sgp=None, outras_olts=None):
             o["classe"], motivo = DECISOES_MANUAIS[(o["serial"], o["descricao"])]
             o["obs"] = [motivo]
 
+    for o in onus:  # ambíguo ou não identificado: offline = remover; online continua em Conferir
+        if o["classe"] in ("Conferir", "Não encontrado") and o["estado"] == "Down":
+            o["classe"] = "Desativado"
+            o["obs"].append("Não foi possível confirmar o cliente e a ONU está offline")
+
     for o in onus:  # alertas de estado da ONU
         if o["classe"] == "Desativado" and o["estado"] == "Up":
             o["obs"].append("ONU ONLINE com contrato desativado — confirmar antes de remover")
