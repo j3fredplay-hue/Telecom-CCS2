@@ -85,8 +85,9 @@ def ler_datacom(texto):
 
 
 def ler_parks(texto):
-    """Saída de `show interface gpon1/1 onu` da Parks. Não traz o estado (Up/Down) da ONU."""
-    onus, pon, atual = [], None, None
+    """Saída de `show interface gpon1/1 onu` (perfil) e/ou `... onu status` (estado) da Parks, no mesmo
+    arquivo. Status ACTIVE = Up, INVALID = Down; sem o status, o estado fica desconhecido."""
+    onus, pon, atual, por_id = [], None, None, {}
     for linha in texto.splitlines():
         m = re.match(r"^\s*Interface gpon(\d+/\d+)", linha)
         if m:
@@ -97,9 +98,20 @@ def ler_parks(texto):
             nome, serial = m.group(2).strip(), m.group(3)
             if not serial and re.fullmatch(r"[0-9a-z]{12}", nome, re.I):
                 nome, serial = "", nome  # ONU sem descrição: o nome é o próprio serial
-            atual = {"pon": pon, "onu_id": int(m.group(1)), "serial": (serial or "").upper(),
-                     "estado": "Desconhecido", "descricao": nome}
-            onus.append(atual)
+            chave_onu = (pon, int(m.group(1)))
+            atual = por_id.get(chave_onu)
+            if not atual:
+                atual = por_id[chave_onu] = {"pon": pon, "onu_id": int(m.group(1)), "serial": (serial or "").upper(),
+                                             "estado": "Desconhecido", "descricao": nome}
+                onus.append(atual)
+            continue
+        m = re.match(r"^\s*Status\s*:\s*(\S+)", linha)
+        if m and atual:
+            atual["estado"] = "Up" if m.group(1).upper() == "ACTIVE" else "Down"
+            continue
+        m = re.match(r"^\s*Power Level\s*:\s*(-?[\d.]+)dBm", linha)
+        if m and atual:
+            atual["sinal"] = float(m.group(1))
             continue
         m = re.match(r"^\s*Flow profile:\s*(\S+)", linha)
         if m and atual:
@@ -492,6 +504,8 @@ def classificar(onus, ixc, sgp=None, outras_olts=None):
     for o in onus:  # alertas de estado da ONU
         if o.get("perfil"):
             o["obs"].append(f"Perfil: {o['perfil']}")
+        if o.get("sinal") is not None and o["sinal"] <= -27:
+            o["obs"].append(f"Sinal óptico baixo: {o['sinal']} dBm")
         if o["classe"] == "Desativado" and o["estado"] == "Up":
             o["obs"].append("ONU ONLINE com contrato desativado — confirmar antes de remover")
         if o["classe"] == "Ativo" and o["estado"] == "Down":
