@@ -596,7 +596,7 @@ def ordenar(onus):
 
 
 def aba_pop(wb, nome_olt, onus, pop):
-    """Inventário do POP (dados/pops.json) e ocupação das PONs."""
+    """Inventário do POP (pops.json) e ocupação das PONs."""
     ws = wb.create_sheet("POP")
     titulo(ws, f"{nome_olt} — Equipamentos do POP", pop.get("pop", ""))
     cab = ["Equipamento", "Fabricante", "Modelo", "Observação"]
@@ -759,7 +759,7 @@ def main():
     ap.add_argument("--sgp", type=Path, help=f"Relatório de contratos do SGP da {NOME_PARCEIRO_SGP}")
     ap.add_argument("--fabricante", choices=sorted(LEITORES))
     ap.add_argument("--nome", help="Nome da OLT (padrão: nome do arquivo)")
-    ap.add_argument("--pops", type=Path, default=Path("dados/pops.json"),
+    ap.add_argument("--pops", type=Path, default=Path("pops.json"),
                     help="Inventário dos POPs: {nome_olt: {pop, portas_pon, equipamentos: [...]}}")
     a = ap.parse_args()
 

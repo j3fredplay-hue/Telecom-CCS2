@@ -1,0 +1,165 @@
+{
+  "OLT1-BRITANNIA": {
+    "pop": "POP Britannia",
+    "portas_pon": 8,
+    "equipamentos": [
+      {
+        "equipamento": "OLT",
+        "fabricante": "Datacom",
+        "modelo": "DM4610 HW2 8GPON+8GX+4GT+2XS",
+        "obs": "8 portas GPON"
+      },
+      {
+        "equipamento": "Switch",
+        "fabricante": "MikroTik",
+        "modelo": "CRS317-1G-16S+",
+        "obs": "Informado como CRS3317-1G-16S"
+      },
+      {
+        "equipamento": "DIO",
+        "fabricante": null,
+        "modelo": null,
+        "obs": "Quantidade de portas não informada"
+      }
+    ]
+  },
+  "OLT1-SHOPMILLENNIUM": {
+    "pop": "POP Shopping Millennium",
+    "portas_pon": 4,
+    "colocation_linhas": 10,
+    "equipamentos": [
+      {
+        "equipamento": "OLT",
+        "fabricante": "Datacom",
+        "modelo": "DM4610 HW2 4GPON+4GX+2XS",
+        "obs": "4 portas GPON"
+      },
+      {
+        "equipamento": "BRAS",
+        "fabricante": "MikroTik",
+        "modelo": "CCR1009-7G-1C-1S+",
+        "obs": null
+      },
+      {
+        "equipamento": "CGNAT",
+        "fabricante": "MikroTik",
+        "modelo": "CCR1009-7G-1C-1S+",
+        "obs": null
+      },
+      {
+        "equipamento": "Switch",
+        "fabricante": "Huawei",
+        "modelo": "48 portas (modelo a definir)",
+        "obs": null
+      },
+      {
+        "equipamento": "DIO",
+        "fabricante": null,
+        "modelo": null,
+        "obs": "Quantidade de portas não informada"
+      }
+    ]
+  },
+  "OLT01MAOCN": {
+    "pop": "POP OLT01MAOCN (ex-Nova Solutec)",
+    "portas_pon": 16,
+    "equipamentos": [
+      {
+        "equipamento": "OLT",
+        "fabricante": "Datacom",
+        "modelo": "DM4615 16GPON+4GT+4XS",
+        "obs": "16 portas GPON"
+      },
+      {
+        "equipamento": "Switch",
+        "fabricante": "Huawei",
+        "modelo": "(modelo a definir)",
+        "obs": null
+      },
+      {
+        "equipamento": "DIO",
+        "fabricante": null,
+        "modelo": null,
+        "obs": "Quantidade de portas não informada"
+      }
+    ]
+  },
+  "OLT1-01MAOMARINAS": {
+    "pop": "POP Marinas (ex-Nova Solutec)",
+    "portas_pon": null,
+    "equipamentos": [
+      {
+        "equipamento": "OLT",
+        "fabricante": "Datacom",
+        "modelo": null,
+        "obs": "Modelo não informado"
+      },
+      {
+        "equipamento": "Switch",
+        "fabricante": "Datacom",
+        "modelo": null,
+        "obs": "Marca a confirmar"
+      },
+      {
+        "equipamento": "DIO",
+        "fabricante": null,
+        "modelo": "24 portas",
+        "obs": null
+      }
+    ]
+  },
+  "OLT1-02MAOEXPOAGRO": {
+    "pop": "POP Expoagro (ex-Nova Solutec)",
+    "portas_pon": 8,
+    "equipamentos": [
+      {
+        "equipamento": "OLT",
+        "fabricante": "Datacom",
+        "modelo": "DM4612 8GPON+2GT+2XS",
+        "obs": "8 portas GPON"
+      },
+      {
+        "equipamento": "Switch",
+        "fabricante": "MikroTik",
+        "modelo": "RB3011UiAS (ARM)",
+        "obs": null
+      },
+      {
+        "equipamento": "Switch",
+        "fabricante": "Datacom",
+        "modelo": "DM4370",
+        "obs": null
+      },
+      {
+        "equipamento": "DIO",
+        "fabricante": null,
+        "modelo": null,
+        "obs": "Quantidade de portas não informada"
+      }
+    ]
+  },
+  "OLT1-4CICOM": {
+    "pop": "POP 4CICOM",
+    "portas_pon": null,
+    "equipamentos": [
+      {
+        "equipamento": "OLT",
+        "fabricante": "Parks",
+        "modelo": null,
+        "obs": "Modelo não informado"
+      },
+      {
+        "equipamento": "Switch",
+        "fabricante": "MikroTik",
+        "modelo": null,
+        "obs": "Modelo não informado"
+      },
+      {
+        "equipamento": "DIO",
+        "fabricante": null,
+        "modelo": null,
+        "obs": "Quantidade de portas não informada"
+      }
+    ]
+  }
+}

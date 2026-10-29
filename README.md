@@ -1,31 +1,53 @@
-# Telecom-CCS2 — Limpeza de ONUs x IXC
+# Telecom-CCS2 — Limpeza de ONUs x IXC (CCS Brasil)
 
-`olt_ixc.py` cruza a lista de ONUs de uma OLT com os relatórios exportados do IXC e gera, por OLT:
+`olt_ixc.py` cruza as ONUs de cada OLT com o IXC (CCS Brasil) e com o SGP da Upwire, e gera por OLT:
 
-- `<OLT>_limpeza.xlsx`: resumo, ONUs a **remover** (contrato desativado), ONUs a **conferir** (sem número, número inexistente no IXC, ambíguas) e a lista completa.
-- `<OLT>_ativos.xlsx`: relatório de clientes ativos, com resumo por PON (cliente final x rede neutra, online x offline), ONUs por cliente/provedor e a lista de ativos.
+- `saida/<OLT>_limpeza.xlsx`: Resumo, **Remover**, **Conferir** e Todas.
+- `saida/<OLT>_ativos.xlsx`: Resumo por PON, ONUs por cliente/provedor, lista de ativos e aba **POP** (equipamentos de `pops.json`).
 
-## Uso
+## Como continuar em uma sessão nova
+
+1. Anexe o arquivo `dados_backup.zip` (relatórios do IXC/SGP e as OLTs já processadas) e diga:
+   > Continue o trabalho da branch `claude/olt-active-inactive-clients-4czwvq`: leia o README, descompacte o dados_backup.zip em `dados/` e processe a OLT anexa.
+2. Anexe a OLT em `.txt` e informe nome da OLT + equipamentos do POP.
+3. Responda às dúvidas de forma curta (ex.: "1 sim, 2 remover").
+
+Se os relatórios do IXC/SGP forem atualizados, anexe os novos no lugar dos do zip.
+
+## Comando
 
 ```bash
-python3 olt_ixc.py dados/olts/OLT1-SHOPMILLENNIUM.txt \
+python3 olt_ixc.py dados/olts/<OLT>.txt \
   --logins dados/ixc/Relatorio_com_Login.xlsx \
   --contratos dados/ixc/Relatorio_de_contrato_do_IXC.xlsx \
-  --sgp dados/ixc/Relatorio_Upwire_SGP.xlsx \
-  --saida saida/
+  --sgp dados/ixc/Relatorio_Upwire_SGP.xlsx --saida saida
 ```
+Depois rodar `recalc.py` (skill xlsx) nos Excel gerados para calcular as fórmulas.
 
-Formatos de OLT suportados: Datacom (saída de `show interface gpon 1/1/ onu`). VSOL e Intelbras EPON: a fazer.
+## Formatos de OLT
 
-## Regras
+- **Datacom**: `show interface gpon 1/1/ onu`.
+- **Parks**: `show interface gponX/Y onu` **e** `show interface gponX/Y onu status` no mesmo `.txt` (status ACTIVE = online, INVALID = offline; também lê o sinal óptico).
+- **VSOL**: a fazer (export/print da web).
 
-- O número após `CTR-` é buscado primeiro como **login PPPoE** e depois como **ID de contrato**.
-- Ativo = status de acesso Ativo, Bloqueio Automático/Manual ou Financeiro em atraso.
-- Rede neutra = plano de venda 67 (Circuito Dedicado); "provável" quando o mesmo número aparece em 3 ou mais ONUs.
-- Parceiro Upwire (`CTR-201939-...`, contrato MARCELO SILVA DO CARMO): o status vem do relatório do SGP do parceiro (`--sgp`), pelo nº do contrato SGP (`CTR-201939-11202`) ou, sem número, pelo nome (`CTR-201939-MONICA`). Cancelado = remover, Suspenso = ativo, Inativo = pré-contrato. Nome ambíguo ou cliente com outro contrato ativo vai para "Conferir".
-- Números do sistema antigo da CCS Brasil (`2019xxx`–`2026xxx`) são buscados como login no IXC; os que não têm login são mapeados em `NUMEROS_ANTIGOS` no script (ex.: `2023716` → contrato 538, ID HOUSE).
-- Mesmo serial provisionado em outra OLT da pasta `dados/olts/`: se aqui está offline e lá online, a ONU é antiga e vai para remoção.
-- Aba **POP** com os equipamentos do POP (de `dados/pops.json`) e a ocupação das PONs.
-- Senhas e outros dados sensíveis do IXC nunca vão para a saída.
+## Regras combinadas com o usuário
 
-As pastas `dados/` e `saida/` ficam fora do git porque têm dados de clientes.
+**Identificação**
+- Número após `CTR-` (aceita `C-TR-`, `CRT-`, `CTR.`, `UPWIRE-CTR-`): primeiro como **login PPPoE** no IXC, depois como **ID de contrato**.
+- Números do sistema antigo da CCS (`2019xxx`–`2026xxx`) sem login no IXC: mapa `NUMEROS_ANTIGOS` (2023716 → ID HOUSE 538; 2025928 → VISION 364).
+- **Upwire** (provedor parceiro, no IXC é o contrato 388 MARCELO SILVA DO CARMO; nº antigo `201939`): `CTR-201939-<contrato SGP>` ou `CTR-201939-<NOME>` → status do cliente no **SGP**. Número de 5 dígitos sem o 201939 (ex.: `CTR-11267`, `11234-nome`) também é procurado no SGP.
+- Descrição só com nome/login (padrão ex-Nova Solutec, ex.: `joedizalima`): busca como login no IXC e no SGP; depois pelo nome (primeiro nome + sobrenomes/iniciais). Mapa `NOMES_CONHECIDOS` para casos confirmados (BOBS, CPDE, STAFF, ID HOUSE, NERDS, FECHACOM…).
+- Rede neutra: plano 67 ou contrato na lista `PARCEIROS_EXTRA` (relatório "Porta - Rede Neutra" do IXC).
+
+**Classificação**
+- Ativo = Ativo, Bloqueio Automático/Manual, Financeiro em atraso (IXC); Ativo/Suspenso (SGP). Inativo no SGP = pré-contrato (mantém).
+- Desativado (IXC) / Cancelado (SGP) = **remover**. ONU de parceiro segue o status do contrato do parceiro.
+- Mesmo cliente com um contrato ativo e outro cancelado = ativo.
+- Cliente **não encontrado ou ambíguo**: offline = **remover**; online = **conferir**.
+- ONU offline cujo mesmo login/cliente (ou serial, em outra OLT) está online em outra ONU = ONU antiga, **remover**.
+- Decisões pontuais: `DECISOES_MANUAIS` (por serial + descrição) e `REMOVER_SEM_CONTRATO` (Tintão).
+- Os arquivos não mencionam o engenheiro.
+
+## Dados
+
+`dados/` e `saida/` ficam fora do git (dados de clientes; senhas do IXC nunca vão para a saída). `pops.json` (equipamentos dos POPs) fica no repositório.
