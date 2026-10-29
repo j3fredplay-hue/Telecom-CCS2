@@ -17,6 +17,7 @@ Regras:
 """
 import argparse
 import collections
+import functools
 import json
 import re
 import unicodedata
@@ -131,8 +132,12 @@ class SGP:
                 d["Status"] = str(d["Status"] or "").strip()
                 self.contratos[d["Contrato ID"]] = d
         self.por_cliente = collections.defaultdict(list)
+        self.logins = collections.defaultdict(list)  # login aparece na observação da última mudança de status
         for c in self.contratos.values():
             self.por_cliente[c["Cliente ID"]].append(c)
+            m = re.search(r"Login:\s*([^\s,]+)", str(c.get("Observação") or ""))
+            if m:
+                self.logins[chave(m.group(1)).split("@")[0]].append(c)
 
     def por_nome(self, texto):
         """Uma palavra: primeiro nome, ou primeiro nome + outro nome colados (DOUGLASVARELA).
@@ -148,6 +153,89 @@ class SGP:
                (len(palavras) > 1 and all(p in nome for p in palavras)):
                 achados.append(c)
         return achados
+
+
+def nome_bate(desc, nome):
+    """'joedizalima' bate com 'JOEDIZA SAMPAIO DE LIMA': começa pelo primeiro nome e o resto é formado
+    por outros nomes (ou suas iniciais), na ordem, pulando os que faltarem."""
+    w = [compacto(x) for x in str(nome).split() if compacto(x)]
+    if not w or not desc.startswith(w[0]):
+        return False
+    if desc == w[0]:
+        return len(desc) >= 8  # só o primeiro nome: aceita apenas nomes longos (ex.: empresas)
+
+    @functools.lru_cache(None)
+    def resto(pos, i):
+        if pos == len(desc):
+            return True
+        return any(desc.startswith(t, pos) and resto(pos + len(t), j + 1)
+                   for j in range(i, len(w)) for t in (w[j], w[j][0]))
+    return resto(len(w[0]), 1)
+
+
+def identificar_por_nome(o, ixc, sgp):
+    """Descrição sem número (padrão Nova Solutec: login ou nome do cliente). Procura no IXC e no SGP Upwire:
+    primeiro como login, depois pelo nome. Devolve True se resolveu a classificação."""
+    texto = re.sub(r"^\s*C-?(?:TR|RT)\b", "", o["descricao"], flags=re.I)
+    partes = [p for p in re.split(r"[-_ ]+", texto) if p]
+    variantes = [compacto("".join(partes[i:])) for i in range(len(partes))]  # 'RN-CLICKSUFT-MARCIABULCAO'
+    variantes = [v for v in dict.fromkeys(variantes) if len(v) >= 5]
+    if not variantes:
+        return False
+
+    achados, por = [], "Login"
+    for v in variantes:
+        achados += [("IXC", r["ID contrato"]) for k, rs in ixc.logins.items() if k.split("@")[0] == v.lower() for r in rs]
+        if sgp:
+            achados += [("SGP", c["Contrato ID"]) for c in sgp.logins.get(v.lower(), [])]
+        if achados:
+            break
+    if not achados:
+        por = "Nome"
+        for v in variantes:
+            achados += [("IXC", cid) for cid, c in ixc.contratos.items() if nome_bate(v, c["Cliente"])]
+            if sgp:
+                achados += [("SGP", cid) for cid, c in sgp.contratos.items() if nome_bate(v, c["Cliente"])]
+            if achados:
+                break
+    achados = list(dict.fromkeys(achados))
+    if not achados:
+        return False
+
+    def status(a):
+        return classe_sgp(sgp.contratos[a[1]]["Status"]) if a[0] == "SGP" else \
+            classe_status(ixc.contrato(a[1])["Status acesso"])
+
+    def nome(a):
+        c = sgp.contratos[a[1]] if a[0] == "SGP" else ixc.contrato(a[1])
+        return f"{a[0]} {a[1]} {c['Cliente']} ({c['Status'] if a[0] == 'SGP' else c['Status acesso']})"
+
+    # vários contratos do mesmo cliente (ex.: um antigo desativado e um ativo): vale o ativo
+    if len({compacto(nome(a).split(" ", 2)[2].rsplit(" (", 1)[0]) for a in achados}) == 1:
+        ativos = [a for a in achados if status(a) == "Ativo"]
+        if ativos:
+            achados = ativos
+    if len({status(a) for a in achados}) > 1:
+        o["classe"] = "Conferir"
+        o["obs"].append(f"{por} bate com mais de um cliente: " + "; ".join(nome(a) for a in achados[:5]))
+        return True
+    sistema, cid = achados[0]
+    if len(achados) > 1:
+        o["obs"].append(f"{por} bate com {len(achados)} contratos, todos {status(achados[0]).lower()}: "
+                        + "; ".join(nome(a) for a in achados[:5]))
+    if sistema == "SGP":
+        o["sgp_pendente"] = cid
+        o["achado_por"] = f"{por} (SGP)"
+        o["classe"] = status(achados[0])
+        parceiro = ixc.logins.get(PARCEIRO_SGP)
+        if parceiro:
+            c = ixc.contrato(parceiro[0]["ID contrato"])
+            o.update(contrato=parceiro[0]["ID contrato"], cliente=c["Cliente"], plano=c["Descrição"])
+    else:
+        c = ixc.contrato(cid)
+        o.update(contrato=cid, achado_por=f"{por} (IXC)", cliente=c["Cliente"], plano=c["Descrição"],
+                 plano_id=c["Plano de venda"], status_ixc=c["Status acesso"], classe=status(achados[0]))
+    return True
 
 
 def classe_sgp(status):
@@ -260,6 +348,8 @@ def classificar(onus, ixc, sgp=None, outras_olts=None):
                 o.update(contrato=cid, achado_por="Nome", cliente=c["Cliente"], plano=c["Descrição"],
                          plano_id=c["Plano de venda"], status_ixc=c["Status acesso"])
                 o["classe"] = classe_status(c["Status acesso"])
+            elif identificar_por_nome(o, ixc, sgp):
+                pass
             elif o["estado"] == "Down":
                 o["classe"] = "Desativado"
                 o["obs"].append("Descrição sem número e sem cliente identificado, ONU offline")
@@ -324,13 +414,16 @@ def classificar(onus, ixc, sgp=None, outras_olts=None):
 
         if sgp and num == PARCEIRO_SGP:
             classificar_sgp(o, sgp)
+        elif o.get("sgp_pendente"):
+            o["sufixo"] = str(o["sgp_pendente"])
+            classificar_sgp(o, sgp)
         elif sgp and num and len(num) == 5 and o.get("achado_por") is None and int(num) in sgp.contratos:
             # cliente Upwire sem o 201939 na descrição (ex.: CTR-11267)
             o["obs"] = [f"Descrição sem o {PARCEIRO_SGP}: contrato {num} encontrado no SGP {NOME_PARCEIRO_SGP}"]
             o.update(sufixo=num + ("-" + o["sufixo"] if o["sufixo"] else ""))
             classificar_sgp(o, sgp)
 
-        if descricoes[o["descricao"].upper().replace("ID", "")] > 1:
+        if o["descricao"] and descricoes[o["descricao"].upper().replace("ID", "")] > 1:
             o["obs"].append("Descrição duplicada nesta OLT (possível ONU antiga não removida)")
 
     # ONU antiga trocada: mesmo login (cliente final) ou mesma descrição (rede neutra) online em outra ONU
@@ -340,11 +433,11 @@ def classificar(onus, ixc, sgp=None, outras_olts=None):
         return ("desc", o["descricao"].upper().replace("ID", "").rstrip(" -_."))
     online = collections.defaultdict(list)
     for o in onus:
-        if o["estado"] == "Up":
+        if o["estado"] == "Up" and o["descricao"]:
             online[grupo(o)].append(o)
     for o in onus:
         outras = online.get(grupo(o))
-        if o["estado"] == "Down" and outras and o["classe"] in ("Ativo", "Conferir", "Não encontrado"):
+        if o["estado"] == "Down" and o["descricao"] and outras and o["classe"] in ("Ativo", "Conferir", "Não encontrado"):
             o["classe"] = "Desativado"
             o["obs"].append("ONU antiga: o mesmo cliente está online em " +
                             ", ".join(f"{x['pon']} ONU {x['onu_id']} ({x['descricao']})" for x in outras))
