@@ -295,8 +295,9 @@ def classificar_sgp(o, sgp):
 # ---------------------------------------------------------------- classificação
 
 def extrair_numero(descricao):
-    """CTR-555, CTR-555-NOME, C-TR-555, CTR555, 555-NOME → '555'."""
-    m = re.match(r"^\s*C-?(?:TR|RT)\s*[-_ ]?\s*(\d+)(.*)$", descricao, re.I) or re.match(r"^\s*(\d+)(.*)$", descricao)
+    """CTR-555, CTR-555-NOME, C-TR-555, CTR555, CTR.555.NOME, UPWIRE-CTR-555, 555-NOME → '555'."""
+    m = re.match(r"^(?:[A-Z]+-)?\s*C-?(?:TR|RT)\s*[-_. ]?\s*(\d+)(.*)$", descricao.strip(), re.I) or \
+        re.match(r"^\s*(\d+)(.*)$", descricao)
     if not m:
         return None, descricao
     return m.group(1), m.group(2).strip(" -_.")
@@ -428,6 +429,8 @@ def classificar(onus, ixc, sgp=None, outras_olts=None):
 
     # ONU antiga trocada: mesmo login (cliente final) ou mesma descrição (rede neutra) online em outra ONU
     def grupo(o):
+        if o.get("sgp_contrato") and "," not in str(o["sgp_contrato"]):
+            return ("sgp", str(o["sgp_contrato"]))
         if o["tipo"] == "Cliente final" and o.get("login") is not None:
             return ("login", chave(o["login"]))
         return ("desc", o["descricao"].upper().replace("ID", "").rstrip(" -_."))
