@@ -84,10 +84,35 @@ def ler_datacom(texto):
     return onus
 
 
-LEITORES = {"datacom": ler_datacom}
+def ler_parks(texto):
+    """Saída de `show interface gpon1/1 onu` da Parks. Não traz o estado (Up/Down) da ONU."""
+    onus, pon, atual = [], None, None
+    for linha in texto.splitlines():
+        m = re.match(r"^\s*Interface gpon(\d+/\d+)", linha)
+        if m:
+            pon = m.group(1)
+            continue
+        m = re.match(r"^\s{2,}(\d+)-(.*?)(?:\s*\(([0-9a-z]{12})\))?:\s*$", linha, re.I)
+        if m and pon:
+            nome, serial = m.group(2).strip(), m.group(3)
+            if not serial and re.fullmatch(r"[0-9a-z]{12}", nome, re.I):
+                nome, serial = "", nome  # ONU sem descrição: o nome é o próprio serial
+            atual = {"pon": pon, "onu_id": int(m.group(1)), "serial": (serial or "").upper(),
+                     "estado": "Desconhecido", "descricao": nome}
+            onus.append(atual)
+            continue
+        m = re.match(r"^\s*Flow profile:\s*(\S+)", linha)
+        if m and atual:
+            atual["perfil"] = m.group(1)
+    return onus
+
+
+LEITORES = {"datacom": ler_datacom, "parks": ler_parks}
 
 
 def detectar_fabricante(texto):
+    if re.search(r"^\s*Interface gpon\d+/\d+", texto, re.M):
+        return "parks"
     if "Software Download State" in texto or re.search(r"^\d+/\d+/\d+\s+\d+\s+", texto, re.M):
         return "datacom"
     raise SystemExit("Formato de OLT não reconhecido. Informe --fabricante.")
@@ -356,7 +381,8 @@ def classificar(onus, ixc, sgp=None, outras_olts=None):
                 o["obs"].append("Descrição sem número e sem cliente identificado, ONU offline")
             else:
                 o["classe"] = "Conferir"
-                o["obs"].append("Descrição sem número e sem cliente identificado, ONU online")
+                o["obs"].append("Descrição sem número e sem cliente identificado, ONU " +
+                                ("online" if o["estado"] == "Up" else "com estado desconhecido"))
                 if "NOVASOLU" in desc:
                     o["obs"].append("Ex-Nova Solutec: pode ser cliente CCS ou Upwire e estar configurado por VLAN "
                                     "(/30 ou /29), sem login PPPoE")
@@ -464,6 +490,8 @@ def classificar(onus, ixc, sgp=None, outras_olts=None):
             o["obs"].append("Não foi possível confirmar o cliente e a ONU está offline")
 
     for o in onus:  # alertas de estado da ONU
+        if o.get("perfil"):
+            o["obs"].append(f"Perfil: {o['perfil']}")
         if o["classe"] == "Desativado" and o["estado"] == "Up":
             o["obs"].append("ONU ONLINE com contrato desativado — confirmar antes de remover")
         if o["classe"] == "Ativo" and o["estado"] == "Down":
