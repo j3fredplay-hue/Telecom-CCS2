@@ -169,20 +169,92 @@
       {
         "equipamento": "OLT",
         "fabricante": "VSOL",
-        "modelo": "EPON (modelo a definir)",
-        "obs": null
+        "modelo": "A preencher",
+        "obs": "EPON"
       },
       {
         "equipamento": "Switch",
         "fabricante": "MikroTik",
-        "modelo": "A definir",
+        "modelo": "A preencher",
         "obs": null
       },
       {
         "equipamento": "DIO",
         "fabricante": null,
-        "modelo": null,
-        "obs": "Quantidade de portas a definir"
+        "modelo": "A preencher",
+        "obs": "Quantidade de portas a preencher"
+      }
+    ]
+  },
+  "OLT1-CENTRO": {
+    "pop": "POP Centro",
+    "portas_pon": null,
+    "equipamentos": [
+      {
+        "equipamento": "OLT",
+        "fabricante": "VSOL",
+        "modelo": "A preencher",
+        "obs": "EPON"
+      },
+      {
+        "equipamento": "Switch",
+        "fabricante": "Huawei",
+        "modelo": "A preencher",
+        "obs": null
+      },
+      {
+        "equipamento": "DIO",
+        "fabricante": null,
+        "modelo": "A preencher",
+        "obs": "Quantidade de portas a preencher"
+      }
+    ]
+  },
+  "OLT1-CONDVILAGAIA": {
+    "pop": "POP Cond. Vila Gaia",
+    "portas_pon": null,
+    "equipamentos": [
+      {
+        "equipamento": "OLT",
+        "fabricante": "VSOL",
+        "modelo": "A preencher",
+        "obs": "EPON"
+      },
+      {
+        "equipamento": "Switch",
+        "fabricante": "MikroTik",
+        "modelo": "A preencher",
+        "obs": null
+      },
+      {
+        "equipamento": "DIO",
+        "fabricante": null,
+        "modelo": "A preencher",
+        "obs": "Quantidade de portas a preencher"
+      }
+    ]
+  },
+  "OLT1-GLORIA": {
+    "pop": "POP Glória",
+    "portas_pon": null,
+    "equipamentos": [
+      {
+        "equipamento": "OLT",
+        "fabricante": "VSOL",
+        "modelo": "A preencher",
+        "obs": "EPON"
+      },
+      {
+        "equipamento": "Switch",
+        "fabricante": "Huawei",
+        "modelo": "A preencher",
+        "obs": null
+      },
+      {
+        "equipamento": "DIO",
+        "fabricante": null,
+        "modelo": "A preencher",
+        "obs": "Quantidade de portas a preencher"
       }
     ]
   }

@@ -145,7 +145,8 @@ def ler_vsol(texto):
                 pass
         elif chave_onu not in por_id:
             por_id[chave_onu] = {"pon": m.group(1), "onu_id": int(m.group(2)), "serial": c[2].upper(),
-                                 "estado": "Up" if c[1].lower() == "online" else "Down", "descricao": c[3]}
+                                 "estado": "Up" if c[1].lower() == "online" else "Down",
+                                 "descricao": "" if c[3].upper() == "N/A" else c[3]}
             onus.append(por_id[chave_onu])
     for chave_onu, sinal in sinais.items():
         if chave_onu in por_id:
@@ -523,9 +524,27 @@ def classificar(onus, ixc, sgp=None, outras_olts=None):
     for o in onus:
         for olt, x in (outras_olts or {}).get(o["serial"], []):
             o["obs"].append(f"Serial também provisionado na {olt} ({x['descricao']}, {x['estado']})")
-            if o["estado"] == "Down" and x["estado"] == "Up" and o["classe"] != "Desativado":
+            if o["estado"] == "Down" and x["estado"] == "Up":
+                o["dup_online"] = True
+                if o["classe"] != "Desativado":
+                    o["classe"] = "Desativado"
+                    o["obs"].append("ONU antiga: este equipamento está online em outra OLT")
+
+    # mesmo serial/MAC duas vezes nesta OLT: fica a que está online, as offline saem
+    por_serial = collections.defaultdict(list)
+    for o in onus:
+        if o["serial"]:
+            por_serial[o["serial"]].append(o)
+    for iguais in por_serial.values():
+        on = [x for x in iguais if x["estado"] == "Up"]
+        for o in iguais:
+            if len(iguais) > 1 and o["estado"] == "Down" and on:
+                o["dup_online"] = True
                 o["classe"] = "Desativado"
-                o["obs"].append("ONU antiga: este equipamento está online em outra OLT")
+                o["obs"].append("Mesmo serial/MAC online nesta OLT em " +
+                                ", ".join(f"{x['pon']} ONU {x['onu_id']} ({x['descricao'] or 'sem descrição'})" for x in on))
+            elif len(iguais) > 1:
+                o["obs"].append("Mesmo serial/MAC em outra ONU desta OLT")
 
     for o in onus:
         if (o["serial"], o["descricao"]) in DECISOES_MANUAIS:
@@ -544,8 +563,9 @@ def classificar(onus, ixc, sgp=None, outras_olts=None):
             o["obs"].append("Não foi possível confirmar o cliente e a ONU está offline")
 
     for o in onus:  # ONU de parceiro (rede neutra) nunca vai para remoção: o controle é do parceiro.
-        # A Upwire é exceção (os clientes dela são controlados pela CCS, pelo SGP).
-        if o.get("tipo") == "Rede neutra" and o["classe"] == "Desativado" and (o["serial"], o["descricao"]) not in DECISOES_MANUAIS:
+        # Exceções: clientes da Upwire (controlados pela CCS, pelo SGP) e o mesmo serial/MAC online em outra ONU.
+        if o.get("tipo") == "Rede neutra" and o["classe"] == "Desativado" and not o.get("dup_online") \
+                and (o["serial"], o["descricao"]) not in DECISOES_MANUAIS:
             o["classe"] = "Ativo" if classe_status(o.get("status_ixc") or "") == "Ativo" else "Conferir"
             o["obs"].append("ONU de parceiro (rede neutra): não remover — o controle é do parceiro")
 

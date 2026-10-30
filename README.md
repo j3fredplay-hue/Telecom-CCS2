@@ -28,7 +28,7 @@ Depois rodar `recalc.py` (skill xlsx) nos Excel gerados para calcular as fórmul
 
 - **Datacom**: `show interface gpon 1/1/ onu`.
 - **Parks**: `show interface gponX/Y onu` **e** `show interface gponX/Y onu status` no mesmo `.txt` (status ACTIVE = online, INVALID = offline; também lê o sinal óptico).
-- **VSOL (EPON)**: aba "ONU list" da web copiada para o bloco de notas (colunas separadas por TAB). O MAC entra no lugar do serial (coluna "Serial/MAC"). A aba "OPM Diag" pode vir logo abaixo no mesmo `.txt`: o RX Power vira o sinal óptico.
+- **VSOL (EPON)**: um `.txt` por OLT, com o nome da OLT no nome do arquivo; aba "ONU list" da web copiada para o bloco de notas (colunas separadas por TAB). O MAC entra no lugar do serial (coluna "Serial/MAC"). A aba "OPM Diag" pode vir logo abaixo no mesmo `.txt`: o RX Power vira o sinal óptico.
 
 ## Regras combinadas com o usuário
 
@@ -42,7 +42,7 @@ Depois rodar `recalc.py` (skill xlsx) nos Excel gerados para calcular as fórmul
 **Classificação**
 - Ativo = Ativo, Bloqueio Automático/Manual, Financeiro em atraso (IXC); Ativo/Suspenso (SGP). Inativo no SGP = pré-contrato (mantém).
 - Desativado (IXC) / Cancelado (SGP) = **remover**.
-- ONU de **parceiro (rede neutra)** nunca vai para remoção: o controle é do parceiro (contrato ativo = Ativo; senão, Conferir). Exceção: clientes da **Upwire** (contrato 388), controlados pela CCS via SGP.
+- ONU de **parceiro (rede neutra)** nunca vai para remoção: o controle é do parceiro (contrato ativo = Ativo; senão, Conferir). Exceção: clientes da **Upwire** (contrato 388), controlados pela CCS via SGP; e ONU com o **mesmo serial/MAC online** em outra ONU (nesta ou em outra OLT): a offline vai para remoção.
 - Mesmo cliente com um contrato ativo e outro cancelado = ativo.
 - Cliente **não encontrado ou ambíguo**: offline = **remover**; online = **conferir**.
 - ONU offline cujo mesmo login/cliente (ou serial, em outra OLT) está online em outra ONU = ONU antiga, **remover**.
