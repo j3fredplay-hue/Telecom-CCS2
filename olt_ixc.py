@@ -59,7 +59,7 @@ NOMES_CONHECIDOS = [
 PARCEIROS_REMOVER = {594}  # LYS FIBRA TELECOMUNICACOES
 
 # Números antigos sem contrato no IXC que o usuário mandou conferir (não remover), mesmo offline.
-NUMEROS_CONFERIR = {"2025894"}
+NUMEROS_CONFERIR = {"2025894", "2024812"}  # 2024812: provavelmente NERDS (parceiro)
 
 # Descrições sem contrato identificado que o usuário mandou remover, mesmo online.
 REMOVER_SEM_CONTRATO = ["TINTAO"]
@@ -71,6 +71,7 @@ DECISOES_MANUAIS = {
     ("ITBSE8D0ACDF", "CTR-TESTE"): ("Desativado", "ONU de teste — remover (confirmado pelo usuário)"),
     ("VSOL00CD28FB", "CTR-201939-REBECA"): ("Desativado", "CTR-201939-REBECA: ONU offline e PPPoE online por outro caminho — não usa esta OLT"),
     ("B4:64:15:CE:81:AB", "CCS-POP-DC"): ("Ativo", "Equipamento da CCS (POP) — manter; a ONU offline com este MAC sai (confirmado pelo usuário)"),
+    ("24:2F:D0:06:3C:F0", "CTR-201939-10641"): ("Conferir", "Upwire: ONU online com contrato cancelado no SGP — conferir (pedido do usuário)"),
     ("24:2F:D0:06:40:80", "CTR-2024783-8-RAFAELA"): ("Conferir", "Parceiro Manaos (contrato 272): ONU offline — conferir (pedido do usuário)"),
 }
 
