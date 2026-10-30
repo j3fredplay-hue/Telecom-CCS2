@@ -55,6 +55,12 @@ NOMES_CONHECIDOS = [
     ("FECHACOM", 253),          # FECHACOM COM DE FECHADURAS
 ]
 
+# Parceiros que cancelaram tudo: todas as ONUs saem, mesmo online (confirmado pelo usuário).
+PARCEIROS_REMOVER = {594}  # LYS FIBRA TELECOMUNICACOES
+
+# Números antigos sem contrato no IXC que o usuário mandou conferir (não remover), mesmo offline.
+NUMEROS_CONFERIR = {"2025894"}
+
 # Descrições sem contrato identificado que o usuário mandou remover, mesmo online.
 REMOVER_SEM_CONTRATO = ["TINTAO"]
 
@@ -64,6 +70,7 @@ DECISOES_MANUAIS = {
     ("TPLGCE8750C1", ""): ("Desativado", "ONU sem descrição — remover (confirmado pelo usuário)"),
     ("ITBSE8D0ACDF", "CTR-TESTE"): ("Desativado", "ONU de teste — remover (confirmado pelo usuário)"),
     ("VSOL00CD28FB", "CTR-201939-REBECA"): ("Desativado", "CTR-201939-REBECA: ONU offline e PPPoE online por outro caminho — não usa esta OLT"),
+    ("B4:64:15:CE:81:AB", "CCS-POP-DC"): ("Ativo", "Equipamento da CCS (POP) — manter; a ONU offline com este MAC sai (confirmado pelo usuário)"),
     ("24:2F:D0:06:40:80", "CTR-2024783-8-RAFAELA"): ("Conferir", "Parceiro Manaos (contrato 272): ONU offline — conferir (pedido do usuário)"),
 }
 
@@ -558,7 +565,8 @@ def classificar(onus, ixc, sgp=None, outras_olts=None):
 
     for o in onus:  # ambíguo ou não identificado: offline = remover; online continua em Conferir
         if o["classe"] in ("Conferir", "Não encontrado") and o["estado"] == "Down" \
-                and (o["serial"], o["descricao"]) not in DECISOES_MANUAIS:
+                and (o["serial"], o["descricao"]) not in DECISOES_MANUAIS \
+                and extrair_numero(o["descricao"])[0] not in NUMEROS_CONFERIR:
             o["classe"] = "Desativado"
             o["obs"].append("Não foi possível confirmar o cliente e a ONU está offline")
 
@@ -568,6 +576,17 @@ def classificar(onus, ixc, sgp=None, outras_olts=None):
                 and (o["serial"], o["descricao"]) not in DECISOES_MANUAIS:
             o["classe"] = "Ativo" if classe_status(o.get("status_ixc") or "") == "Ativo" else "Conferir"
             o["obs"].append("ONU de parceiro (rede neutra): não remover — o controle é do parceiro")
+
+    for o in onus:
+        if o["classe"] == "Desativado" and not o.get("dup_online") \
+                and extrair_numero(o["descricao"])[0] in NUMEROS_CONFERIR:
+            o["classe"] = "Conferir"
+            o["obs"].append("Número sem contrato no IXC — conferir, não remover (pedido do usuário)")
+
+    for o in onus:
+        if o.get("contrato") in PARCEIROS_REMOVER:
+            o["classe"] = "Desativado"
+            o["obs"].append("Parceiro cancelou todos os serviços — remover (confirmado pelo usuário)")
 
     for o in onus:  # alertas de estado da ONU
         if o.get("perfil"):

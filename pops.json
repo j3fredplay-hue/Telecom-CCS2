@@ -353,5 +353,53 @@
         "obs": "Quantidade de portas a preencher"
       }
     ]
+  },
+  "OLT1-TARUMA": {
+    "pop": "POP Tarumã",
+    "portas_pon": null,
+    "equipamentos": [
+      {
+        "equipamento": "OLT",
+        "fabricante": "VSOL",
+        "modelo": "A preencher",
+        "obs": "EPON"
+      },
+      {
+        "equipamento": "Switch",
+        "fabricante": "MikroTik",
+        "modelo": "A preencher",
+        "obs": null
+      },
+      {
+        "equipamento": "DIO",
+        "fabricante": null,
+        "modelo": "A preencher",
+        "obs": "Quantidade de portas a preencher"
+      }
+    ]
+  },
+  "OLT1-RESTAPAJOS": {
+    "pop": "POP Res. Tapajós",
+    "portas_pon": null,
+    "equipamentos": [
+      {
+        "equipamento": "OLT",
+        "fabricante": "VSOL",
+        "modelo": "A preencher",
+        "obs": "EPON"
+      },
+      {
+        "equipamento": "Switch",
+        "fabricante": "MikroTik",
+        "modelo": "A preencher",
+        "obs": null
+      },
+      {
+        "equipamento": "DIO",
+        "fabricante": null,
+        "modelo": "A preencher",
+        "obs": "Quantidade de portas a preencher"
+      }
+    ]
   }
 }
