@@ -257,5 +257,101 @@
         "obs": "Quantidade de portas a preencher"
       }
     ]
+  },
+  "OLT1-MFAMAZONIA": {
+    "pop": "POP MF Amazônia",
+    "portas_pon": null,
+    "equipamentos": [
+      {
+        "equipamento": "OLT",
+        "fabricante": "VSOL",
+        "modelo": "A preencher",
+        "obs": "EPON"
+      },
+      {
+        "equipamento": "Switch",
+        "fabricante": "MikroTik",
+        "modelo": "A preencher",
+        "obs": null
+      },
+      {
+        "equipamento": "DIO",
+        "fabricante": null,
+        "modelo": "A preencher",
+        "obs": "Quantidade de portas a preencher"
+      }
+    ]
+  },
+  "OLT1-SAOFRANCISCO": {
+    "pop": "POP São Francisco",
+    "portas_pon": null,
+    "equipamentos": [
+      {
+        "equipamento": "OLT",
+        "fabricante": "VSOL",
+        "modelo": "A preencher",
+        "obs": "EPON"
+      },
+      {
+        "equipamento": "Switch",
+        "fabricante": "MikroTik",
+        "modelo": "A preencher",
+        "obs": null
+      },
+      {
+        "equipamento": "DIO",
+        "fabricante": null,
+        "modelo": "A preencher",
+        "obs": "Quantidade de portas a preencher"
+      }
+    ]
+  },
+  "OLT2-SAOFRANCISCO": {
+    "pop": "POP São Francisco",
+    "portas_pon": null,
+    "equipamentos": [
+      {
+        "equipamento": "OLT",
+        "fabricante": "VSOL",
+        "modelo": "A preencher",
+        "obs": "EPON"
+      },
+      {
+        "equipamento": "Switch",
+        "fabricante": "MikroTik",
+        "modelo": "A preencher",
+        "obs": null
+      },
+      {
+        "equipamento": "DIO",
+        "fabricante": null,
+        "modelo": "A preencher",
+        "obs": "Quantidade de portas a preencher"
+      }
+    ]
+  },
+  "OLT1-SHOPVIANORTE": {
+    "pop": "POP Shopping Via Norte",
+    "portas_pon": null,
+    "equipamentos": [
+      {
+        "equipamento": "OLT",
+        "fabricante": "VSOL",
+        "modelo": "A preencher",
+        "obs": "EPON"
+      },
+      {
+        "equipamento": "Switch",
+        "fabricante": "MikroTik",
+        "modelo": "A preencher",
+        "obs": null
+      },
+      {
+        "equipamento": "DIO",
+        "fabricante": null,
+        "modelo": "A preencher",
+        "obs": "Quantidade de portas a preencher"
+      }
+    ]
   }
 }
